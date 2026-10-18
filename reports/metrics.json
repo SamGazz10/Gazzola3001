@@ -1,0 +1,21 @@
+{
+  "test_attempts": 30000,
+  "network": {
+    "log_loss": 0.18383103609085083,
+    "brier": 0.05784930661320686,
+    "roc_auc": 0.9602056153753482,
+    "accuracy": 0.9179333333333334,
+    "calibration_error": 0.00309867816350112
+  },
+  "logistic_regression": {
+    "log_loss": 0.2728633180462597,
+    "brier": 0.0839708907923099,
+    "roc_auc": 0.904368486338726,
+    "accuracy": 0.883,
+    "calibration_error": 0.0046635395769079845
+  },
+  "mean_abs_error_vs_true_probability": {
+    "network": 0.014425549042899376,
+    "logistic_regression": 0.08370364320172839
+  }
+}
