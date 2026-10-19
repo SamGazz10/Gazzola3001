@@ -6,16 +6,16 @@
 Each experiment writes ``reports/results/<name>.json`` and a figure in
 ``reports/figures/``.
 
-=================  ==========================================================
-``solver``         Euler and RK4 against analytical solutions; observed order
-``timestep``       Error and cost of the full two-car model against time step
-``quadrature``     Quadrature rules and Monte Carlo against a reference
-``selection``      Network size and training-set size, on the validation set
-``comparison``     Network vs logistic regression vs gradient boosting vs
-                   direct simulation, on the test set
-``performance``    Profiling, vectorisation, chunk size, FLOPs and memory
-``sensitivity``    One-at-a-time sensitivity, network vs simulator truth
-=================  ==========================================================
+| Name | What it does |
+|---|---|
+| `solver` | Euler and RK4 against analytical solutions; observed order |
+| `timestep` | Error and cost of the full two-car model against time step |
+| `quadrature` | Quadrature rules and Monte Carlo against a reference |
+| `selection` | Network size and training-set size, on the validation set |
+| `ablation` | Physics-informed inputs and five-network ensembles, five seeds |
+| `comparison` | Network vs logistic regression vs gradient boosting vs direct simulation, on the test set |
+| `performance` | Profiling, vectorisation, chunk size, FLOPs and memory |
+| `sensitivity` | One-at-a-time sensitivity, network vs simulator truth |
 
 ``comparison`` and ``sensitivity`` use the trained network in ``models/``,
 so run ``python -m overtake.train`` first.
@@ -222,25 +222,36 @@ ARCHITECTURES = [(32,), (64, 64), (128, 128, 64), (256, 256, 128)]
 def _inference_seconds(predictor, df, repeats=3):
     cat, num = predictor.preprocessor.transform(df)
     with torch.no_grad():
-        seconds, _ = _timed(lambda: predictor.model(cat, num), repeats)
+        seconds, _ = _timed(lambda: [m(cat, num) for m in predictor.models], repeats)
     return seconds
 
 
 def selection():
-    """Choose the network size, then check how much data it needs.
+    """Choose the network size (single networks, raw inputs), then check how much data it needs.
 
     Selection uses the validation set only. Both validation log loss (which
     would be available with real data) and error against the true
     probability (simulation only) are recorded, to check they agree.
+
+    Rule: the one-standard-error rule (Hastie, Tibshirani and Friedman, *The
+    Elements of Statistical Learning*, Section 7.10) - the smallest network
+    whose validation log loss is within one standard error of the best. Two
+    runs with different data put 64-64 and 128-128-64 in different orders by
+    less than 0.001, so a rule that only takes the minimum would pick on noise.
     """
     train_df, val_df, _ = split(dataset(), SEED)
     y, p_true = val_df[LABEL].to_numpy(), val_df["p_true"].to_numpy()
-    architectures = []
+    default_truth = float(simulator.probability(pd.DataFrame([DEFAULTS]))[0])
+    architectures, trained = [], {}
     for hidden in ARCHITECTURES:
         start = time.perf_counter()
         predictor, history = train_network(train_df, val_df, hidden=hidden, seed=SEED, log=lambda _: None)
         fit_seconds = time.perf_counter() - start
-        m = metrics(y, predictor.predict(val_df), p_true)
+        trained[hidden] = predictor
+        p = predictor.predict(val_df)
+        m = metrics(y, p, p_true)
+        p = np.clip(p, 1e-7, 1 - 1e-7)
+        losses = -(y * np.log(p) + (1 - y) * np.log(1 - p))
         architectures.append({
             "label": "-".join(map(str, hidden)),
             "hidden": list(hidden),
@@ -250,25 +261,89 @@ def selection():
             "fit_seconds": fit_seconds,
             "inference_us_per_prediction": 1e6 * _inference_seconds(predictor, val_df) / len(val_df),
             "val_log_loss": m["log_loss"],
+            "val_log_loss_se": float(losses.std(ddof=1) / np.sqrt(len(losses))),
             "val_mae_vs_true": m["mae_vs_true"],
+            "default_scenario_error": predictor.predict(DEFAULTS) - default_truth,
         })
         print(architectures[-1], flush=True)
 
-    best = min(architectures, key=lambda a: a["val_log_loss"])
+    lowest = min(architectures, key=lambda a: a["val_log_loss"])
+    threshold = lowest["val_log_loss"] + lowest["val_log_loss_se"]
+    best = min((a for a in architectures if a["val_log_loss"] <= threshold), key=lambda a: a["parameters"])
+    chosen = tuple(best["hidden"])
+
     data_sizes = []
     for size in (10_000, 30_000, 100_000, len(train_df)):
-        predictor, _ = train_network(train_df.iloc[:size], val_df, hidden=tuple(best["hidden"]), seed=SEED,
-                                     log=lambda _: None)
+        if size == len(train_df):
+            predictor = trained[chosen]
+        else:
+            predictor, _ = train_network(train_df.iloc[:size], val_df, hidden=chosen, seed=SEED, log=lambda _: None)
         m = metrics(y, predictor.predict(val_df), p_true)
         data_sizes.append({"train_size": size, "val_log_loss": m["log_loss"], "val_mae_vs_true": m["mae_vs_true"]})
         print(data_sizes[-1], flush=True)
 
     plots.model_selection(architectures, data_sizes, FIGURES / "model_selection.png")
-    return _write("selection", {"architectures": architectures, "selected": best["label"],
-                                "selection_rule": "lowest validation log loss", "data_sizes": data_sizes})
+    return _write("selection", {"architectures": architectures, "lowest_log_loss": lowest["label"],
+                                "threshold": threshold, "selected": best["label"],
+                                "selection_rule": "smallest network within one standard error of the "
+                                                  "lowest validation log loss",
+                                "default_scenario_truth": default_truth, "data_sizes": data_sizes})
+
+
+def ablation(seeds=(0, 1, 2, 3, 4)):
+    """Physics-informed inputs and ensembling, over five training seeds.
+
+    The selected network is trained five times (seeds 0-4) with and without
+    the `DERIVED` energy-cover inputs. For each single run, and for the
+    ensemble that averages the five runs' probabilities, this records the
+    validation log loss and error against truth, the error at the default
+    scenario, and the worst error along the attacker-battery axis through the
+    default scenario (30-100 %).
+
+    A first version with three seeds showed that the seed alone moves the
+    default-scenario prediction by about 3 points, which is what motivated
+    testing an ensemble.
+    """
+    from .train import HIDDEN
+    train_df, val_df, _ = split(dataset(), SEED)
+    y, p_true = val_df[LABEL].to_numpy(), val_df["p_true"].to_numpy()
+    axis = pd.DataFrame([{**DEFAULTS, "attacker_battery": b} for b in np.arange(30.0, 101.0, 2.5)])
+    axis_truth = simulator.probability(axis)
+    default_truth = float(simulator.probability(pd.DataFrame([DEFAULTS]))[0])
+
+    def evaluate(p_val, p_default, p_axis):
+        m = metrics(y, p_val, p_true)
+        return {"val_log_loss": m["log_loss"], "val_mae_vs_true": m["mae_vs_true"],
+                "default_scenario_error": float(p_default - default_truth),
+                "battery_axis_max_error": float(np.abs(p_axis - axis_truth).max())}
+
+    out = {"hidden": list(HIDDEN), "seeds": list(seeds), "default_scenario_truth": default_truth}
+    for name, physics in (("raw inputs only", False), ("with energy-cover inputs", True)):
+        runs, preds = [], []
+        for seed in seeds:
+            predictor, history = train_network(train_df, val_df, hidden=HIDDEN, seed=seed, physics_features=physics,
+                                               log=lambda _: None)
+            p = (predictor.predict(val_df), predictor.predict(DEFAULTS), predictor.predict(axis))
+            preds.append(p)
+            runs.append({"seed": seed, "epochs": len(history), **evaluate(*p)})
+            print(name, runs[-1], flush=True)
+        summary = {key: {"mean": float(np.mean([r[key] for r in runs])), "sd": float(np.std([r[key] for r in runs], ddof=1))}
+                   for key in ("val_log_loss", "val_mae_vs_true", "default_scenario_error", "battery_axis_max_error")}
+        ensemble = evaluate(*(np.mean([p[i] for p in preds], axis=0) for i in range(3)))
+        out[name] = {"runs": runs, "single_model": summary, "ensemble_of_5": ensemble}
+        print(name, "ensemble", ensemble, flush=True)
+    return _write("ablation", out)
 
 
 # --- 5. Comparison with alternatives ----------------------------------------
+
+def tyre_mismatch(df):
+    """True where either car's tyres do not suit the surface (slicks when damp/wet, treaded tyres when dry)."""
+    slicks = ["soft", "medium", "hard"]
+    dry = df["track_condition"] == "dry"
+    wrong = [(dry & ~df[c].isin(slicks)) | (~dry & df[c].isin(slicks)) for c in ("attacker_tyre", "defender_tyre")]
+    return (wrong[0] | wrong[1]).to_numpy()
+
 
 def _region_errors(test_df, p):
     err = np.abs(p - test_df["p_true"].to_numpy())
@@ -277,12 +352,20 @@ def _region_errors(test_df, p):
         for value in VOCABS[CATEGORICAL[column]]:
             mask = (test_df[column] == value).to_numpy()
             regions[value] = float(err[mask].mean())
+    mismatch = tyre_mismatch(test_df)
+    regions["tyres_suit_surface"] = float(err[~mismatch].mean())
+    regions["tyre_mismatch"] = float(err[mismatch].mean())
     return regions
+
+
+def _error_quantiles(test_df, p):
+    err = np.abs(p - test_df["p_true"].to_numpy())
+    return {f"q{int(q * 1000) / 10:g}": float(np.quantile(err, q)) for q in (0.5, 0.9, 0.99, 0.999, 1.0)}
 
 
 def _model_bytes(obj):
     if isinstance(obj, OvertakePredictor):
-        return sum(p.numel() * p.element_size() for p in obj.model.parameters())
+        return sum(p.numel() * p.element_size() for m in obj.models for p in m.parameters())
     return len(pickle.dumps(obj.pipeline))
 
 
@@ -298,12 +381,12 @@ def comparison():
     models = {"Neural network": network,
               "Logistic regression": baselines.logistic_regression().fit(train_df),
               "Gradient boosting": baselines.gradient_boosting(SEED).fit(train_df)}
-    history = torch.load(DEFAULT_MODEL, map_location="cpu", weights_only=True)["history"]
-    fit_seconds = {"Neural network": sum(h["seconds"] for h in history)}
+    fit_seconds = {"Neural network": torch.load(DEFAULT_MODEL, map_location="cpu", weights_only=True)["fit_seconds"]}
     fit_seconds.update({k: m.fit_seconds for k, m in models.items() if k != "Neural network"})
 
     sample = test_df.iloc[:10_000]
-    out = {"test_attempts": len(test_df), "models": {}, "regions": {}}
+    out = {"test_attempts": len(test_df), "tyre_mismatch_share": float(tyre_mismatch(test_df).mean()),
+           "models": {}, "regions": {}, "error_quantiles": {}}
     for name, model in models.items():
         p = model.predict(test_df)
         seconds, _ = _timed(lambda: model.predict(sample))
@@ -311,6 +394,12 @@ def comparison():
                                "predict_us_per_scenario": 1e6 * seconds / len(sample),
                                "model_bytes": _model_bytes(model)}
         out["regions"][name] = _region_errors(test_df, p)
+        out["error_quantiles"][name] = _error_quantiles(test_df, p)
+        err, mismatch = np.abs(p - p_true), tyre_mismatch(test_df)
+        out["error_quantiles"][name]["tyre_mismatch_share_of_worst_1pct"] = float(
+            mismatch[err >= np.quantile(err, 0.99)].mean())
+        out["error_quantiles"][name]["tyre_mismatch_share_of_worst_0.1pct"] = float(
+            mismatch[err >= np.quantile(err, 0.999)].mean())
 
     seconds, p_exact = _timed(lambda: simulator.probability(sample), repeats=1)
     out["models"]["Direct simulation"] = {"mae_vs_true": float(np.abs(p_exact - sample["p_true"]).mean()),
@@ -374,11 +463,12 @@ def performance():
     network = OvertakePredictor.load()
     hidden = network.model.hidden
     t_nn = _inference_seconds(network, sample)
-    nn = nn_flops(hidden)
-    params = sum(p.numel() for p in network.model.parameters())
+    nn = nn_flops(hidden) * len(network.models)
+    params = network.n_parameters
     width_in = network.model.mlp[0].in_features
     out["flops"] = {
         "network_hidden": list(hidden),
+        "network_members": len(network.models),
         "network_flops_per_prediction": nn,
         "network_gflops_achieved": nn * len(sample) / t_nn / 1e9,
         "network_us_per_prediction_batch_10k": 1e6 * t_nn / len(sample),
@@ -444,7 +534,22 @@ def sensitivity():
     plots.what_if(network.predict, FIGURES / "what_if.png",
                   exact=lambda s: simulator.probability(pd.DataFrame(s)))
     base = {"network": network.predict(DEFAULTS), "exact": float(simulator.probability(pd.DataFrame([DEFAULTS]))[0])}
-    return _write("sensitivity", {"default_scenario": base, "rows": rows})
+
+    # The bias near a full attacker battery, repeated on a wet track with intermediates.
+    wet = {**DEFAULTS, "track_condition": "wet", "attacker_tyre": "intermediate",
+           "defender_tyre": "intermediate", "track_temp_c": 20.0}
+    axis = pd.DataFrame([{**wet, "attacker_battery": b} for b in (40.0, 60.0, 80.0, 100.0)])
+    wet_axis = [{"attacker_battery": b, "network": float(n), "exact": float(e)}
+                for b, n, e in zip(axis["attacker_battery"], network.predict(axis), simulator.probability(axis))]
+    _, _, test_df = split(dataset(), SEED)
+    mask = ((test_df["track_condition"] == "wet") & (test_df["segment"] == "straight")
+            & test_df["attacker_tyre"].isin(["intermediate", "wet"]) & test_df["defender_tyre"].isin(["intermediate", "wet"]))
+    err = network.predict(test_df[mask]) - test_df.loc[mask, "p_true"].to_numpy()
+    wet_test = {"scenarios": int(mask.sum()), "mean_signed_error": float(err.mean()),
+                "mean_abs_error": float(np.abs(err).mean())}
+    return _write("sensitivity", {"default_scenario": base, "rows": rows,
+                                  "wet_intermediates_battery_axis": wet_axis,
+                                  "test_wet_straights_treaded_tyres": wet_test})
 
 
 EXPERIMENTS = {
@@ -452,6 +557,7 @@ EXPERIMENTS = {
     "timestep": timestep,
     "quadrature": quadrature,
     "selection": selection,
+    "ablation": ablation,
     "comparison": comparison,
     "performance": performance,
     "sensitivity": sensitivity,

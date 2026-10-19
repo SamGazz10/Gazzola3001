@@ -18,13 +18,15 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
-from .features import BINARY, CATEGORICAL, LABEL, NUMERIC, VOCABS, as_frame
+from .features import BINARY, CATEGORICAL, LABEL, NUMERIC, VOCABS, as_frame, validate
 
 COLUMNS = list(CATEGORICAL) + NUMERIC + BINARY
 
 
 def _inputs(df):
-    return as_frame(df)[COLUMNS].astype({c: int for c in BINARY})
+    df = as_frame(df)
+    validate(df)
+    return df[COLUMNS].astype({c: int for c in BINARY})
 
 
 class SklearnModel:

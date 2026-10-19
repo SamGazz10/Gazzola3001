@@ -36,17 +36,17 @@ import pandas as pd
 from scipy.special import expit, ndtr
 
 from .features import CIRCUITS, COMPOUNDS, CONDITIONS, LABEL, SEGMENTS
-from .physics import CarParameters, CarState, run_to_braking_point
+from .physics import (BATTERY_USABLE_J, OVERTAKE_MODE_EXTRA_J, CarParameters, CarState, rk4_step,
+                      run_to_braking_point, two_car_rhs)
 
 CAR = CarParameters()
-BATTERY_USABLE_J = 4.0e6        # energy store window at 100 % charge (approx.)
-OVERTAKE_MODE_EXTRA_J = 0.5e6   # extra energy with Overtake Mode (2026 rules)
 STANDARD_MAP_SHARE = 0.55       # share of MGU-K power used without Boost (estimate)
 EXIT_SPEED_MPS = 33.0           # corner-exit speed onto the run, new softs, dry (estimate, ~120 km/h)
 DIRTY_AIR_GRIP_LOSS = 0.06      # grip lost in the exit corner when right behind another car (estimate)
 TOP_SPEED_REF_MPS = 92.0        # reference top speed for converting a speed advantage to drag
 LAP_TIME_REF_S = 90.0           # reference lap time for converting a pace advantage to exit speed
-TIME_STEP_S = 0.05              # ODE step (see experiments.timestep_study)
+TIME_STEP_S = 0.05              # ODE step (see experiments.timestep)
+FULL_BATTERY_SHARE = 0.15       # share of sampled attempts starting with a full battery
 
 LUNGE_RANGE_S = 0.15            # deficit at the braking point from which a lunge is possible (estimate)
 MAX_MARGIN_S = 0.5
@@ -114,24 +114,21 @@ def tyre_grip(compound, age, condition, track_temp):
     return base - wear - 0.01 * cold_hard
 
 
-def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
-    """Stage 1: integrate both cars along the run for every scenario.
+def initial_conditions(df, car=CAR):
+    """Translate scenarios into the physical inputs of the two-car model.
 
     Parameters
     ----------
     df : pandas.DataFrame
         Scenarios in the `overtake.features` schema.
-    dt : float, optional
-        Integration time step, s.
-    method : {"rk4", "euler"}, optional
     car : CarParameters, optional
 
     Returns
     -------
-    run : overtake.physics.RunResult
-        State at the braking point, including the deficit in seconds.
-    grip_a, grip_d : numpy.ndarray
-        Relative tyre grip of the attacker and defender.
+    dict
+        ``attacker`` and ``defender`` (`CarState`), corner-exit speeds
+        ``v0_a`` and ``v0_d`` (m/s), ``gap`` (s), ``length`` (m) and relative
+        tyre grip ``grip_a`` and ``grip_d``.
     """
     cond = df["track_condition"].to_numpy()
     temp = df["track_temp_c"].to_numpy(dtype=float)
@@ -164,9 +161,66 @@ def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
     v0_d = EXIT_SPEED_MPS * np.sqrt(grip_d)
     v0_a = (EXIT_SPEED_MPS * np.sqrt(grip_a * (1 - DIRTY_AIR_GRIP_LOSS * np.exp(-gap)))
             * (1 + df["pace_delta_s"].to_numpy(dtype=float) / LAP_TIME_REF_S))
-    run = run_to_braking_point(df["run_length_m"].to_numpy(dtype=float), gap, v0_a, v0_d,
-                               attacker, defender, car, dt=dt, method=method)
-    return run, grip_a, grip_d
+    return {"attacker": attacker, "defender": defender, "v0_a": v0_a, "v0_d": v0_d, "gap": gap,
+            "length": df["run_length_m"].to_numpy(dtype=float), "grip_a": grip_a, "grip_d": grip_d}
+
+
+def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
+    """Stage 1: integrate both cars along the run for every scenario.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Scenarios in the `overtake.features` schema.
+    dt : float, optional
+        Integration time step, s.
+    method : {"rk4", "euler"}, optional
+    car : CarParameters, optional
+
+    Returns
+    -------
+    run : overtake.physics.RunResult
+        State at the braking point, including the deficit in seconds.
+    grip_a, grip_d : numpy.ndarray
+        Relative tyre grip of the attacker and defender.
+    """
+    ic = initial_conditions(df, car)
+    run = run_to_braking_point(ic["length"], ic["gap"], ic["v0_a"], ic["v0_d"], ic["attacker"], ic["defender"],
+                               car, dt=dt, method=method)
+    return run, ic["grip_a"], ic["grip_d"]
+
+
+def speed_trace(scenario, dt=TIME_STEP_S, car=CAR):
+    """Time history of both cars along the run for one scenario.
+
+    Parameters
+    ----------
+    scenario : dict
+        A complete scenario in the `overtake.features` schema.
+    dt : float, optional
+    car : CarParameters, optional
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``t`` (s), ``attacker_x``, ``defender_x`` (m, from the corner
+        exit), ``attacker_kph``, ``defender_kph`` and ``attacker_mj``,
+        ``defender_mj`` (electrical energy used), one row per step until the
+        defender reaches the braking point.
+    """
+    ic = initial_conditions(pd.DataFrame([scenario]), car)
+    y = np.array([[-ic["gap"][0] * ic["v0_d"][0]], [ic["v0_a"][0]], [0.0], [0.0], [ic["v0_d"][0]], [0.0]])
+    rows, t = [], 0.0
+    while y[3, 0] < ic["length"][0]:
+        rows.append([t, *y[:, 0]])
+        y = rk4_step(lambda s: two_car_rhs(s, ic["attacker"], ic["defender"], car), y, dt)
+        t += dt
+    trace = pd.DataFrame(rows, columns=["t", "attacker_x", "attacker_v", "attacker_e",
+                                        "defender_x", "defender_v", "defender_e"])
+    for who in ("attacker", "defender"):
+        trace[f"{who}_kph"] = trace.pop(f"{who}_v") * 3.6
+        trace[f"{who}_mj"] = trace.pop(f"{who}_e") / 1e6
+    return trace
 
 
 def outcome_parameters(df, run, grip_a, grip_d):
@@ -335,6 +389,13 @@ def sample_scenarios(n, rng):
             out[mask] = rng.choice(COMPOUNDS, mask.sum(), p=tyre_probs[c])
         return out
 
+    def battery():
+        # A full battery is a common race state (after a safety car or a
+        # harvesting lap), so 15 % of attempts start at exactly 100 %. Without
+        # this, 100 % sits at the edge of the training data, where the network
+        # was found to be least accurate (experiments.sensitivity).
+        return np.where(rng.random(n) < FULL_BATTERY_SHARE, 100.0, rng.uniform(0, 100, n))
+
     seg = rng.choice(SEGMENTS, n, p=[0.55, 0.20, 0.15, 0.10])
     gap = rng.uniform(0.05, 2.0, n)
     # The gap at the detection point differs a little from the gap when the attack starts.
@@ -347,8 +408,8 @@ def sample_scenarios(n, rng):
         "defender_tyre": tyres(),
         "gap_s": gap,
         "run_length_m": np.where(seg == "straight", rng.uniform(250, 1300, n), rng.uniform(50, 300, n)),
-        "attacker_battery": rng.uniform(0, 100, n),
-        "defender_battery": rng.uniform(0, 100, n),
+        "attacker_battery": battery(),
+        "defender_battery": battery(),
         "attacker_tyre_age": rng.integers(0, 41, n).astype(float),
         "defender_tyre_age": rng.integers(0, 41, n).astype(float),
         "track_temp_c": np.where(cond == "dry", rng.uniform(18, 55, n), rng.uniform(10, 32, n)),

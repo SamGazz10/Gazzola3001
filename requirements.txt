@@ -1,6 +1,13 @@
+# Core
 numpy>=1.26
 pandas>=2.1
+scipy>=1.11
 torch>=2.2
 scikit-learn>=1.4
 matplotlib>=3.8
+
+# Tests, test report, HTML documentation, notebook
 pytest>=8
+pytest-html>=4
+pdoc>=14
+jupyter>=1.0

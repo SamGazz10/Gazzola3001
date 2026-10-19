@@ -8,12 +8,15 @@ From Python:
     predictor = OvertakePredictor.load()
     predictor.predict({"track_condition": "dry", "attacker_tyre": "soft", "gap_s": 1.0})
 
-Fields you leave out take the values in `features.DEFAULTS`; `overtake_mode`
-defaults to "gap is 1 s or less".
+Fields you leave out take the values in `overtake.features.DEFAULTS`;
+``overtake_mode`` defaults to "gap is 1 s or less". Invalid inputs raise a
+``ValueError`` (the command line prints the message and exits with status 2).
 """
 import argparse
+import sys
 from pathlib import Path
 
+import pandas as pd
 import torch
 
 from .features import CIRCUITS, COMPOUNDS, CONDITIONS, DEFAULTS, NUMERIC, SEGMENTS, Preprocessor, as_frame
@@ -23,40 +26,117 @@ DEFAULT_MODEL = Path(__file__).resolve().parent.parent / "models" / "overtake_ne
 
 
 class OvertakePredictor:
-    def __init__(self, model, preprocessor):
-        self.model = model.eval()
+    """One or more trained networks together with the preprocessing they were trained with.
+
+    With several networks (an ensemble trained from different random seeds)
+    the prediction is the mean of their probabilities.
+
+    Parameters
+    ----------
+    models : overtake.model.OvertakeNet or list of them
+        All trained on the same data, so they share one preprocessor.
+    preprocessor : overtake.features.Preprocessor
+        Fitted on the networks' training data.
+    """
+
+    def __init__(self, models, preprocessor):
+        self.models = [m.eval() for m in (models if isinstance(models, (list, tuple)) else [models])]
         self.preprocessor = preprocessor
+
+    @property
+    def model(self):
+        """The first network (all members share the same architecture)."""
+        return self.models[0]
+
+    @property
+    def n_parameters(self):
+        """Trainable parameters across all networks."""
+        return sum(p.numel() for m in self.models for p in m.parameters())
 
     @classmethod
     def load(cls, path=DEFAULT_MODEL):
+        """Load a checkpoint written by `save`.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path, optional
+            Defaults to ``models/overtake_net.pt``.
+
+        Returns
+        -------
+        OvertakePredictor
+
+        Raises
+        ------
+        FileNotFoundError
+            If there is no checkpoint at ``path``.
+        """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"no trained model at {path}; run `python -m overtake.train` first")
         checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        model = OvertakeNet(checkpoint["hidden"], checkpoint["dropout"])
-        model.load_state_dict(checkpoint["model_state"])
-        return cls(model, Preprocessor.from_state_dict(checkpoint["preprocessor"]))
+        models = []
+        for state in checkpoint["model_states"]:
+            model = OvertakeNet(checkpoint["hidden"], checkpoint["dropout"], checkpoint["n_inputs"])
+            model.load_state_dict(state)
+            models.append(model)
+        return cls(models, Preprocessor.from_state_dict(checkpoint["preprocessor"]))
 
     def save(self, path, **extra):
+        """Write weights, architecture and preprocessing statistics to ``path``.
+
+        Extra keyword arguments (e.g. metrics, training history) are stored
+        alongside and must be plain Python values.
+        """
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save({
-            "model_state": self.model.state_dict(),
+            "model_states": [m.state_dict() for m in self.models],
             "hidden": self.model.hidden,
             "dropout": self.model.dropout,
+            "n_inputs": self.model.n_inputs,
             "preprocessor": self.preprocessor.state_dict(),
             **extra,
         }, path)
 
     def predict(self, scenarios):
-        """P(overtake) for one scenario (dict -> float) or many (list/DataFrame -> array)."""
+        """Probability of an overtake.
+
+        Parameters
+        ----------
+        scenarios : dict, list of dict or pandas.DataFrame
+            One or more scenarios in the `overtake.features` schema. Missing
+            fields take their default values.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            A float for a single dict, otherwise one probability per row.
+
+        Raises
+        ------
+        ValueError
+            If a value is outside the schema (see `overtake.features.validate`).
+        """
         df = complete(scenarios)
         cat, num = self.preprocessor.transform(df)
         with torch.no_grad():
-            p = torch.sigmoid(self.model(cat, num)).numpy()
+            p = torch.stack([torch.sigmoid(m(cat, num)) for m in self.models]).mean(dim=0).numpy()
         return float(p[0]) if isinstance(scenarios, dict) else p
 
     def out_of_range(self, scenario):
-        """Inputs outside the range seen in training, where predictions are extrapolation."""
+        """List inputs outside the range seen in training, where predictions are extrapolation.
+
+        Parameters
+        ----------
+        scenario : dict
+            One scenario (missing fields take default values).
+
+        Returns
+        -------
+        list of str
+            One message per numeric input more than 2 % of its range outside
+            the training data's minimum-maximum range; empty if none.
+        """
         df = complete(scenario)
         warnings = []
         for col in NUMERIC:
@@ -69,14 +149,16 @@ class OvertakePredictor:
 
 
 def complete(scenarios):
-    """Fill in missing fields from DEFAULTS."""
+    """Return the scenarios as a DataFrame with missing fields filled from `DEFAULTS`."""
     df = as_frame(scenarios).copy()
     for col, value in DEFAULTS.items():
         if col != "overtake_mode":
             df[col] = df[col].fillna(value) if col in df else value
+    # Non-numeric gaps are left for validate() to reject with a clear message.
+    within_one_second = pd.to_numeric(df["gap_s"], errors="coerce") <= 1.0
     if "overtake_mode" not in df:
-        df["overtake_mode"] = df["gap_s"] <= 1.0
-    df["overtake_mode"] = df["overtake_mode"].fillna(df["gap_s"] <= 1.0).astype(bool)
+        df["overtake_mode"] = within_one_second
+    df["overtake_mode"] = df["overtake_mode"].where(df["overtake_mode"].notna(), within_one_second)
     return df
 
 
@@ -154,10 +236,15 @@ def describe(s):
 
 
 def main(argv=None):
+    """Command-line entry point; see ``python -m overtake.predict --help``."""
     args = parse_args(argv)
     predictor = OvertakePredictor.load(args.model)
     scenario = scenario_from_args(args)
-    p = predictor.predict(scenario)
+    try:
+        p = predictor.predict(scenario)
+    except ValueError as error:
+        print(f"invalid input: {error}", file=sys.stderr)
+        raise SystemExit(2)
 
     print("Scenario")
     print(describe(scenario))

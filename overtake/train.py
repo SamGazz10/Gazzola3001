@@ -31,7 +31,8 @@ from .predict import DEFAULT_MODEL, OvertakePredictor
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORTS = ROOT / "reports"
-HIDDEN = (128, 128, 64)  # chosen in experiments.model_selection
+HIDDEN = (64, 64)  # chosen by experiments.selection (one-standard-error rule)
+ENSEMBLE = 5       # networks averaged; chosen by experiments.ablation
 
 
 def load_data(path=None, samples=300_000, seed=0):
@@ -71,8 +72,8 @@ def split(df, seed=0):
     return df.iloc[idx[2 * n:]], df.iloc[idx[:n]], df.iloc[idx[n:2 * n]]
 
 
-def train_network(train_df, val_df, hidden=HIDDEN, dropout=0.1, epochs=40, batch_size=1024, lr=2e-3,
-                  patience=5, seed=0, log=print):
+def train_network(train_df, val_df, hidden=HIDDEN, dropout=0.1, epochs=100, batch_size=1024, lr=2e-3,
+                  patience=5, seed=0, physics_features=False, log=print):
     """Train an `OvertakeNet` with binary cross-entropy and early stopping.
 
     Parameters
@@ -91,6 +92,9 @@ def train_network(train_df, val_df, hidden=HIDDEN, dropout=0.1, epochs=40, batch
         Stop after this many epochs without validation improvement and restore the best weights.
     seed : int, optional
         Seeds weight initialisation and batch order, so runs are repeatable.
+    physics_features : bool, optional
+        Include the derived energy-cover inputs (`overtake.features.DERIVED`);
+        off in the final model (see `overtake.experiments.ablation`).
     log : callable, optional
         Receives one progress line per epoch.
 
@@ -102,13 +106,13 @@ def train_network(train_df, val_df, hidden=HIDDEN, dropout=0.1, epochs=40, batch
         Per-epoch training and validation loss and wall-clock time.
     """
     torch.manual_seed(seed)
-    preprocessor = Preprocessor().fit(train_df)
+    preprocessor = Preprocessor(physics_features=physics_features).fit(train_df)
     x_cat, x_num = preprocessor.transform(train_df)
     y = torch.tensor(train_df[LABEL].to_numpy(dtype=np.float32))
     v_cat, v_num = preprocessor.transform(val_df)
     v_y = torch.tensor(val_df[LABEL].to_numpy(dtype=np.float32))
 
-    model = OvertakeNet(hidden, dropout)
+    model = OvertakeNet(hidden, dropout, preprocessor.n_inputs)
     optimiser = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimiser, factor=0.5, patience=2)
     loss_fn = nn.BCEWithLogitsLoss()
@@ -143,6 +147,38 @@ def train_network(train_df, val_df, hidden=HIDDEN, dropout=0.1, epochs=40, batch
                 break
     model.load_state_dict(best_state)
     return OvertakePredictor(model, preprocessor), history
+
+
+def train_ensemble(train_df, val_df, n_members=ENSEMBLE, seed=0, log=print, **kwargs):
+    """Train ``n_members`` networks with seeds ``seed, seed + 1, ...`` and average them.
+
+    Each member is trained exactly as by `train_network`; their predicted
+    probabilities are averaged, which reduces the run-to-run variation of a
+    single network.
+
+    Parameters
+    ----------
+    train_df, val_df : pandas.DataFrame
+    n_members : int, optional
+    seed : int, optional
+    log : callable, optional
+    **kwargs
+        Passed to `train_network`.
+
+    Returns
+    -------
+    predictor : OvertakePredictor
+        All members, sharing one preprocessor (they see the same training data).
+    histories : list of list of dict
+        Each member's training history.
+    """
+    members, histories = [], []
+    for k in range(n_members):
+        log(f"-- network {k + 1} of {n_members}")
+        predictor, history = train_network(train_df, val_df, seed=seed + k, log=log, **kwargs)
+        members.append(predictor)
+        histories.append(history)
+    return OvertakePredictor([m.model for m in members], members[0].preprocessor), histories
 
 
 def expected_calibration_error(y, p, bins=10):
@@ -189,10 +225,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--data", type=Path, help="CSV of labelled attempts (default: simulate)")
     parser.add_argument("--samples", type=int, default=300_000, help="simulated attempts to generate")
-    parser.add_argument("--epochs", type=int, default=40)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=2e-3)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--ensemble", type=int, default=ENSEMBLE, help="networks to train and average")
     parser.add_argument("--out", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--reports", type=Path, default=REPORTS)
     args = parser.parse_args(argv)
@@ -202,8 +239,8 @@ def main(argv=None):
     print(f"{len(df):,} attempts ({time.perf_counter() - start:.0f}s); overtake rate {df[LABEL].mean():.1%}")
     train_df, val_df, test_df = split(df, args.seed)
 
-    predictor, history = train_network(train_df, val_df, epochs=args.epochs, batch_size=args.batch_size,
-                                       lr=args.lr, seed=args.seed)
+    predictor, histories = train_ensemble(train_df, val_df, args.ensemble, seed=args.seed, epochs=args.epochs,
+                                          batch_size=args.batch_size, lr=args.lr)
     logistic = baselines.logistic_regression().fit(train_df)
     boosting = baselines.gradient_boosting(args.seed).fit(train_df)
 
@@ -215,11 +252,12 @@ def main(argv=None):
     results = {"test_attempts": len(test_df),
                "models": {name: metrics(y, p, p_true) for name, p in predictions.items()}}
 
-    predictor.save(args.out, metrics=results, history=history)
+    fit_seconds = sum(h["seconds"] for history in histories for h in history)
+    predictor.save(args.out, metrics=results, history=histories[0], fit_seconds=fit_seconds)
     (args.reports / "figures").mkdir(parents=True, exist_ok=True)
     (args.reports / "results").mkdir(parents=True, exist_ok=True)
     (args.reports / "results" / "test_metrics.json").write_text(json.dumps(results, indent=2))
-    plots.training_curve(history, args.reports / "figures" / "training_curve.png")
+    plots.training_curve(histories[0], args.reports / "figures" / "training_curve.png")
     plots.calibration(y, predictions, args.reports / "figures" / "calibration.png")
     exact = (lambda s: simulator.probability(pd.DataFrame(s))) if args.data is None else None
     plots.what_if(predictor.predict, args.reports / "figures" / "what_if.png", exact=exact)

@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 GRAVITY = 9.81  # m/s^2
+BATTERY_USABLE_J = 4.0e6        # usable battery energy at 100 % charge (estimate)
+OVERTAKE_MODE_EXTRA_J = 0.5e6   # extra energy with Overtake Mode (2026 rules)
 
 
 @dataclass(frozen=True)
@@ -367,7 +369,7 @@ def run_to_braking_point(run_length_m, gap_s, attacker_speed0, defender_speed0, 
     car : CarParameters, optional
     dt : float, optional
         Time step, s. 0.05 s keeps the deficit error below 1 ms (see
-        ``overtake.experiments.timestep_study``).
+        ``overtake.experiments.timestep``).
     method : {"rk4", "euler"}, optional
     max_time_s : float, optional
         Safety limit; a RuntimeError is raised if a car has not reached the
