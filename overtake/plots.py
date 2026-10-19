@@ -60,6 +60,43 @@ def _log_ticks(ax, values, axis="x"):
     target.set_minor_formatter(matplotlib.ticker.NullFormatter())
 
 
+def _label_points(ax, xs, ys, labels, marker_pt=4):
+    """Label scatter points without labels overlapping each other, the points or the axes edge.
+
+    Points with the most close neighbours are labelled first; each label tries
+    positions around its point (right, above, below, left, then further out)
+    and takes the first free one. Call after the layout is final.
+    """
+    fig = ax.figure
+    renderer = fig.canvas.get_renderer()
+    radius = marker_pt * fig.dpi / 72
+    points = ax.transData.transform(np.column_stack([xs, ys]))
+    taken = [matplotlib.transforms.Bbox.from_extents(px - radius, py - radius, px + radius, py + radius)
+             for px, py in points]
+    taken += [t.get_window_extent(renderer) for t in ax.texts]
+    near = [(np.hypot(*(points - pt).T) < 60).sum() for pt in points]
+    candidates = [((5, 2), "left", "bottom"), ((5, -2), "left", "top"), ((0, 6), "center", "bottom"),
+                  ((0, -6), "center", "top"), ((-5, 2), "right", "bottom"), ((-5, -2), "right", "top"),
+                  ((6, 0), "left", "center"), ((-6, 0), "right", "center"),
+                  ((0, 14), "center", "bottom"), ((0, -14), "center", "top")]
+
+    def place(i, offset, ha, va):
+        text = ax.annotate(labels[i], (xs[i], ys[i]), xytext=offset, textcoords="offset points", ha=ha, va=va,
+                           color=INK_SECONDARY, fontsize=8)
+        return text, text.get_window_extent(renderer).padded(1)
+
+    for i in sorted(range(len(labels)), key=lambda i: -near[i]):
+        for candidate in candidates:
+            text, box = place(i, *candidate)
+            inside = ax.bbox.contains(box.x0, box.y0) and ax.bbox.contains(box.x1, box.y1)
+            if inside and not any(box.overlaps(t) for t in taken):
+                break
+            text.remove()
+        else:  # nowhere free: fall back to the first position
+            text, box = place(i, *candidates[0])
+        taken.append(box)
+
+
 def _save(fig, path):
     fig.tight_layout()
     fig.savefig(path, dpi=160)
@@ -387,4 +424,135 @@ def speed_trace(traces, path):
         bottom.set_ylabel("Battery energy used (MJ)")
         bottom.set_xlabel("Defender distance from corner exit (m)")
         top.legend(loc="lower right")
+    _save(fig, path)
+
+
+def real_telemetry(result, path):
+    """Real full-throttle speed trace against the RK4 car model, and the fit over every straight.
+
+    Parameters
+    ----------
+    result : dict
+        ``telemetry`` part of `overtake.realdata.analyse`.
+    path : str or pathlib.Path
+    """
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.9), gridspec_kw={"width_ratios": [1.4, 1]})
+    traces = result["traces"]
+    models = [k for k in traces if k != "real"]
+    for name, color in zip(models, SERIES):
+        left.plot(traces[name]["x"], traces[name]["kph"], color=color, label=f"Model: {name}")
+    left.plot(traces["real"]["x"], traces["real"]["kph"], color=INK, linewidth=2.5, label="Real (OpenF1)")
+    left.set_xlabel("Distance along the straight (m)")
+    left.set_ylabel("Speed (km/h)")
+    left.set_title(f"Longest straight, car {result['car']['driver_number']}, Monza 2026")
+    left.legend(loc="lower right")
+
+    data = [result["rms_kph"][m] for m in models]
+    box = right.boxplot(data, vert=False, patch_artist=True, widths=0.5,
+                        medianprops={"color": INK, "linewidth": 1.5}, flierprops={"markersize": 3})
+    for patch, color in zip(box["boxes"], SERIES):
+        patch.set_facecolor(color)
+        patch.set_edgecolor(color)
+    right.set_yticks(range(1, len(models) + 1),
+                     [f"{m}\nbest fit on {result['best_fit'][m]} of {result['runs']}" for m in models])
+    right.set_xlabel("RMS speed error per straight (km/h)")
+    right.set_title("All full-throttle straights")
+    right.grid(axis="y", visible=False)
+    _save(fig, path)
+
+
+def real_gap(result, path):
+    """Pass rate against the gap to the car ahead: real races and the simulator.
+
+    Parameters
+    ----------
+    result : dict
+        ``gap`` part of `overtake.realdata.analyse`.
+    path : str or pathlib.Path
+    """
+    real, sim = result["real"], result["simulated"]
+    mids = [(r["low"] + r["high"]) / 2 for r in real]
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.9))
+    ref = real[1]["rate"]
+    lo = [r["relative"] - r["ci"][0] / ref for r in real]
+    hi = [r["ci"][1] / ref - r["relative"] for r in real]
+    left.errorbar(mids, [r["relative"] for r in real], yerr=[lo, hi], color=INK, label="Real 2026 races (per lap)",
+                  capsize=3, **MARKER)
+    sim_mids = [m for m, q in zip(mids, sim) if q["n"]]
+    left.plot(sim_mids, [q["relative"] for q in sim if q["n"]], color=SERIES[1],
+              label="Simulator (per attempt)", **MARKER)
+    left.axvline(1.0, color=AXIS, linewidth=1)
+    left.annotate("Overtake Mode limit", (1.0, 0.5), xycoords=left.get_xaxis_transform(), xytext=(4, 0),
+                  textcoords="offset points", rotation=90, va="center", color=MUTED, fontsize=8)
+    left.set_xlabel("Gap to the car ahead (s)")
+    left.set_ylabel("Pass rate relative to 0.25-0.5 s")
+    left.set_title("Shape: how fast the chance falls with gap")
+    left.set_ylim(0, None)
+    left.legend(loc="upper right")
+
+    rates = [100 * r["rate"] for r in real]
+    err = [[100 * (r["rate"] - r["ci"][0]) for r in real], [100 * (r["ci"][1] - r["rate"]) for r in real]]
+    right.errorbar(mids, rates, yerr=err, color=INK, capsize=3, **MARKER)
+    right.axvline(1.0, color=AXIS, linewidth=1)
+    right.set_xlabel("Gap at the start of the lap (s)")
+    right.set_ylabel("Laps with an on-track pass (%)")
+    right.set_title(f"Real 2026 races ({result['driver_laps']:,} driver-laps, 95 % intervals)")
+    right.set_ylim(0, None)
+    _save(fig, path)
+
+
+def real_circuits(result, path):
+    """Real on-track passes per lap against the simulator's circuit passability.
+
+    Parameters
+    ----------
+    result : dict
+        `overtake.realdata.analyse` output (uses ``races`` and ``circuits``).
+    path : str or pathlib.Path
+    """
+    rows = [r for r in result["races"] if r.get("passability") is not None]
+    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    ax.plot([r["passability"] for r in rows], [r["on_track_per_lap"] for r in rows], linestyle="none",
+            color=SERIES[0], **{**MARKER, "markersize": 7})
+    c = result["circuits"]
+    ax.annotate(f"Spearman rank correlation {c['spearman_rho']:.2f} (p = {c['p_value']:.3f}, {c['n']} circuits)",
+                (0.02, 0.96), xycoords="axes fraction", va="top", color=INK)
+    ax.set_xlabel("Simulator passability (estimate, log-odds)")
+    ax.set_ylabel("Real on-track passes per race lap")
+    ax.set_title("Circuits: model assumption against 2026 races")
+    fig.tight_layout()
+    fig.canvas.draw()
+    _label_points(ax, [r["passability"] for r in rows], [r["on_track_per_lap"] for r in rows],
+                  [r["race"].replace("-Francorchamps", "") for r in rows])
+    _save(fig, path)
+
+
+def real_speed_traps(rows, path):
+    """Speed-trap readings per race against the 2026 MGU-K speed limits.
+
+    Parameters
+    ----------
+    rows : list of dict
+        ``speed_traps`` part of `overtake.realdata.analyse`.
+    path : str or pathlib.Path
+    """
+    rows = sorted(rows, key=lambda r: r["median"])
+    fig, ax = plt.subplots(figsize=(8, 0.32 * len(rows) + 1.4))
+    y = np.arange(len(rows))
+    ax.hlines(y, [r["median"] for r in rows], [r["max"] for r in rows], color=GRID, linewidth=3)
+    ax.plot([r["median"] for r in rows], y, linestyle="none", color=SERIES[0], label="Median lap", **MARKER)
+    ax.plot([r["p99"] for r in rows], y, linestyle="none", color=SERIES[1], label="99th percentile", **MARKER)
+    ax.plot([r["max"] for r in rows], y, linestyle="none", marker="|", markersize=10, markeredgewidth=2,
+            color=INK, label="Fastest reading")
+    # Labels sit left of their lines, low down, where the slow circuits leave the plot empty.
+    for x, row, label in ((337, 0.5, "337 km/h: full power\nends with Overtake Mode"),
+                          (355, 1.5, "355 km/h: electric\npower reaches zero")):
+        ax.axvline(x, color=AXIS, linewidth=1)
+        ax.annotate(label, (x, row), xytext=(-4, 0), textcoords="offset points", ha="right", va="center",
+                    color=MUTED, fontsize=8)
+    ax.set_yticks(y, [r["race"] for r in rows])
+    ax.set_xlabel("Highest speed per lap from the timing points (km/h)")
+    ax.set_title("Speed traps, every 2026 race lap")
+    ax.legend(loc="upper left")
+    ax.grid(axis="y", visible=False)
     _save(fig, path)

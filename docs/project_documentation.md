@@ -37,6 +37,13 @@ softs, full battery, 1 s behind on an 800 m straight, Boost and Overtake
 Mode) the simulator gives 47% and the network 44%;
 without Boost the chance falls below 1 %.
 
+Compared with 17 real 2026 races (1,222 on-track passes, OpenF1 timing data),
+the simulator's physics holds up (real top speeds respect the 355 km/h limit;
+real acceleration matches the car model within about 10 km/h) and its circuit
+ranking agrees moderately (rank correlation 0.65), but it makes passes from
+0.5-1 s behind too easy, because real drivers ration battery energy over the
+lap (Section 5.4).
+
 ---
 
 ## 1. Engineering problem
@@ -254,12 +261,13 @@ Gauss-Legendre quadrature.
 | `predict.py` | command line and Python API |
 | `experiments.py`, `plots.py` | every study and figure in this document |
 | `export.py` | spreadsheet of all simulation data and results |
+| `realdata.py` | download of real 2026 race data (OpenF1) and comparison with the simulator |
 
 `python -m overtake.train` (about 4 minutes on a 4-core CPU) and
 `python -m overtake.experiments all` (about 20 minutes) regenerate all
 results; `python -m overtake.export` writes every simulated attempt (inputs,
 physics results, outcome, true and predicted probabilities), the metric and
-input lists and every experiment's results to one spreadsheet; `python -m pytest` runs 51 tests.
+input lists and every experiment's results to one spreadsheet; `python -m pytest` runs 64 tests (offline: the real-data tests use small hand-made inputs).
 
 ## 4. Alternative solutions
 
@@ -408,9 +416,140 @@ The validation shows that the numerical methods are implemented correctly and
 that the network reproduces the simulator. It does **not** show that the
 simulator matches real 2026 racing. Parameters marked as estimates, the
 execution-noise model and the circuit factors have not been fitted to real
-overtakes, and the plausibility checks in Section 3.2 are coarse. Testing that
-would need labelled real attempts with battery and Boost data, which are not
-public.
+overtakes, and the plausibility checks in Section 3.2 are coarse. A direct
+test would need labelled real attempts with battery and Boost data, which are
+not public. Section 5.4 tests the simulator indirectly against the public data
+that do exist.
+
+### 5.4 Comparison with real 2026 races
+
+`python -m overtake.experiments real` (`overtake/realdata.py`; results in
+`reports/results/real_data.json`). The first run downloads the data (about 4
+minutes); later runs read a local cache and take under a minute.
+
+**Data.** [OpenF1](https://openf1.org) is a free, unofficial API of Formula 1
+timing data. Of the sources checked (Kaggle datasets, FastF1, TracingInsights,
+OpenF1), it was chosen because it has the 2026 season with position changes,
+gaps, race-control messages and telemetry behind one web API. It gives, for
+every race: lap start times and speed-trap speeds for every car; the gap to the
+car ahead about every 4 s; pit stops; race-control messages (safety cars, red
+flags, Overtake Mode enabled or disabled); position changes between cars (a
+beta "overtakes" feed); and, for single cars, speed, throttle and brake at
+about 3.7 Hz. It does
+**not** record battery charge or Boost and Overtake Mode use, so no real attempt
+can be labelled with all 19 inputs. 19 races were run before 19 October 2026;
+OpenF1 has no data for two (Sakhir, Jeddah), leaving **17 races**. The cut-off
+date is fixed in the code so the results do not change as later races are run.
+
+**Step 1: from position changes to overtakes.** OpenF1 records 4,289
+position changes. Each is given the first reason that applies:
+
+| Reason | Rule | Position changes |
+|---|---|---:|
+| Start | lap 1 (standing start) | 962 |
+| Neutralised | during a safety car, virtual safety car or red flag, or while race control had disabled Overtake Mode | 852 |
+| Pit stop | either car pitted on that lap or the lap before, or is on its pit-out lap | 1,253 |
+| **On track** | everything else | **1,222** (28 %) |
+
+Neutralised periods come from race-control messages: a period starts with
+OVERTAKE DISABLED, SAFETY CAR DEPLOYED, VSC DEPLOYED or RED FLAG and ends with
+OVERTAKE ENABLED (or TRACK CLEAR for a safety car). Both kinds of message are
+needed, because race control does not announce every safety car with
+OVERTAKE DISABLED. The first version of the filter had no such rule; checking
+individual passes against the raw rows showed why it was needed (at Monza a
+"pass" on lap 6 was made behind the safety car after a red flag, on a 148 s
+lap against a normal 88 s). Passes on cars slowing with a problem cannot be
+identified from the data and remain.
+
+**Step 2: speeds and the 2026 electrical-power limit.** The rules cut MGU-K
+power to zero at 355 km/h (Section 1). Over 19,588 race laps the highest
+speed-trap reading per lap exceeds 355 km/h on 2 laps (0.2 % of laps at
+Catalunya, maximum 358 km/h, plausibly in a slipstream); everywhere else the
+maximum is 287-353 km/h. This supports the taper the simulator uses.
+
+![Speed traps](../reports/figures/real_speed_traps.png)
+
+**Step 3: the car model against telemetry.** One car's telemetry from the
+Monza race (car 81) was split into full-throttle stretches (throttle ≥ 99 %,
+no brake, at least 6 s, gaining at least 80 km/h): 135 straights, median
+884 m, distance from the trapezoidal integral of speed. For each, the RK4 car
+model of Section 3.2 was started at the same speed and run for the same time
+with full Boost, the standard energy map, and no electrical power.
+
+| Model variant | Best fit (of 135 straights) | Median RMS speed error |
+|---|---:|---:|
+| Standard map (55 % deployment) | 115 | 9.9 km/h |
+| No electrical power | 18 | 23.4 km/h |
+| Full Boost | 2 | 21.2 km/h |
+
+The physics reproduces real acceleration to within about 10 km/h when the
+deployment matches what drivers actually use. On the longest straight
+(1,250 m, 15 s) the real car accelerates from 226 to a peak of 317 km/h and
+then *loses* speed to 302 km/h before braking: the battery runs out or is
+deliberately saved (energy is rationed over a lap). The model, which spends
+energy on each straight without thinking about the next one, ends at 324
+(standard map) or 332 km/h (Boost).
+
+![Telemetry](../reports/figures/real_telemetry.png)
+
+**Step 4: pass rate against gap.** For every driver-lap (14,942 after
+removing lap 1, pit laps, neutralised laps, the leader and lapped cars) the
+gap to the car ahead at the start of the lap was taken from the nearest
+interval reading (within 10 s), and the lap counts as a pass if that driver
+made an on-track pass before the next lap began (945 laps). Rates are shown with 95 % Wilson score intervals,
+which unlike the normal approximation stay inside [0, 1] for small counts.
+
+| Gap at lap start | Driver-laps | Real pass rate per lap | Relative to 0.25-0.5 s | Simulator, relative |
+|---|---:|---:|---:|---:|
+| 0-0.25 s | 233 | 63 % (56-69) | 1.77 | 1.16 |
+| 0.25-0.5 s | 801 | 35 % (32-39) | 1.00 | 1.00 |
+| 0.5-0.75 s | 1,250 | 16 % (14-18) | 0.45 | 0.82 |
+| 0.75-1 s | 1,061 | 6.9 % (5.5-8.6) | 0.19 | 0.65 |
+| 1-1.25 s | 841 | 3.6 % (2.5-5.0) | 0.10 | 0.48 |
+| 1.25-1.5 s | 705 | 4.5 % (3.2-6.3) | 0.13 | 0.37 |
+| 1.5-2 s | 1,078 | 3.2 % (2.3-4.5) | 0.09 | 0.27 |
+| 2-3 s | 1,532 | 2.3 % (1.7-3.2) | 0.07 | outside simulated range |
+
+The real rate is per lap and the simulator's is per attempt, and the
+simulator's average is over its own mix of scenarios, so their levels are not
+comparable; their *shapes* are, so both are divided by their value at
+0.25-0.5 s. The real chance falls much faster: at 0.75-1 s it is a fifth of
+its 0.25-0.5 s value, against two thirds in the simulator. Beyond 1 s it levels
+off at 2-5 % per lap instead of continuing to fall. There is no sharp step at
+the 1 s Overtake Mode threshold in the real data, but a step would be blurred
+here because the gap is measured at the start of the lap, not at the
+detection point. The simulator therefore makes passes from 0.5-1 s too easy,
+consistent with Step 3: real drivers do not have the full battery for every
+straight that the scenarios assume. The floor beyond 1 s is passes the
+simulator does not model (gaps closed during the lap, mistakes, cars with
+problems).
+
+![Pass rate and gap](../reports/figures/real_gap.png)
+
+**Step 5: circuits.** On-track passes per race lap range from 0.27 (Monaco)
+to 3.25 (Monza). Ranked against the simulator's estimated circuit
+passability (Section 3.4; Kuala Lumpur has no value), the Spearman rank
+correlation is **0.65** (p = 0.006, 16 circuits); without Monaco, which is
+extreme on both scales, 0.58 (p = 0.023). A rank correlation was used because
+the two quantities are on different scales and only their order is
+comparable. The largest disagreements are Suzuka (second most passes,
+below-average passability in the model) and Madrid (few passes, average
+passability).
+
+![Circuits](../reports/figures/real_circuits.png)
+
+**What this shows.** The physics is plausible: real speeds respect the 355 km/h
+limit and real acceleration matches the car model within about 10 km/h. The
+circuit factors are right in order to a moderate degree. The probability model is too
+optimistic between 0.5 and 1 s, because it lets the attacker use more energy on
+one straight than drivers in 2026 actually do. Without battery data this
+comparison cannot calibrate the simulator; it shows which assumption to fix
+first (energy management across the lap).
+
+**Limitations of the comparison.** No battery or Boost data, so the inputs of
+real attempts are unknown; OpenF1's overtakes feed is a beta and is filtered
+heuristically; the per-lap pass rate includes passes not made on the main
+straight; the telemetry is one car at one circuit.
 
 ## 6. Optimisation and performance
 
@@ -502,7 +641,9 @@ how Boost's value grows with straight length.
 
 **Limitations.** The model's realism is limited by the simulator: estimated
 parameters, a single-straight scope, a simple driver model, and no real
-outcome data. The network is accurate on average but less so for rare
+labelled attempts. Compared with real 2026 races (Section 5.4) the chance of
+passing from 0.5-1 s behind is too high, because the simulator gives the
+attacker more energy per straight than drivers actually use. The network is accurate on average but less so for rare
 combinations, outside its training range, and near a full attacker battery,
 where it under-predicts by about 3.5 points in the dry and up to about 10
 points in the wet.
@@ -526,9 +667,19 @@ points in the wet.
    which gives some confidence they would also guide selection on real data.
 5. *Data, not network size, limits accuracy.* Doubling the network did not
    help; more data did.
+6. *Verification is not validation.* Every numerical check passed, yet real
+   races show the simulator's gap curve is too flat: the equations were solved
+   correctly but one assumption (a full battery for every attack) is wrong.
+   Indirect real data (speeds, gaps, position changes) was enough to find this
+   even without battery data. Filtering the raw data mattered as much as the
+   model: 72 % of OpenF1's "overtakes" were the start, pit stops or
+   neutralised periods, and the safety-car rule was found only by checking
+   individual passes against the raw rows.
 
-**Improvements.** Fit the uncertain constants to real races (speed-trap data
-and overtake counts are public); extend to a full lap with energy strategy;
+**Improvements.** Model energy management across a lap (the main
+discrepancy found in Section 5.4), then fit the execution noise and circuit
+factors to the real pass-rate curve and per-circuit pass counts; extend to a
+full lap with energy strategy;
 use event location so RK4 keeps fourth order through the kinks; fine-tune the
 network on real labelled attempts.
 
@@ -544,7 +695,8 @@ Claude Code (Anthropic) was used throughout, in a cloud development session.
 | First version | Wrote a first simulator with hand-tuned formulas and the network | Replaced after reading the project brief: it had no numerical method that could be verified |
 | Physics model and numerics | Wrote the two-car ODE model, RK4/Euler, Hermite crossing, quadrature | Analytical-solution tests, convergence studies, Monte Carlo agreement |
 | Calibration | Proposed the estimated constants and tuned them for plausibility | Speed traces and representative scenarios checked; constants marked as estimates |
-| Network, baselines, experiments, figures, tests, docs | Wrote the code and this documentation draft | 51 automated tests; all numbers regenerated by the code |
+| Network, baselines, experiments, figures, tests, docs | Wrote the code and this documentation draft | 64 automated tests; all numbers regenerated by the code |
+| Real-data comparison | Searched for public 2026 data (Kaggle, FastF1, OpenF1); wrote the download, filtering and comparison code | Filters tested on hand-made races; individual passes checked against the raw OpenF1 rows |
 
 Errors made by the AI and caught during the work: a first simulator too crude
 for the unit's requirements; a slipstream discontinuity (found by the
@@ -552,7 +704,9 @@ time-step study); two wrong diagnoses of the network's error at a full
 battery (a data gap, then a physics-informed input that one training run made
 look like a fix and five runs did not support); tests with wrong expectations
 (wet-track test using slick tyres; Euler order measured at too large a step);
-a crash on text input in the prediction tool.
+a crash on text input in the prediction tool; a first real-data filter that
+counted position changes behind the safety car as overtakes (found by checking
+individual passes against the raw data).
 
 ### Reflection
 
@@ -586,3 +740,5 @@ how AI affected your understanding and workflow.
 12. F. Pedregosa et al., "Scikit-learn: machine learning in Python", JMLR 12, 2011.
 13. A. Paszke et al., "PyTorch: an imperative style, high-performance deep learning library", NeurIPS 2019.
 14. T. Hastie, R. Tibshirani and J. Friedman, *The Elements of Statistical Learning*, 2nd ed., Springer, 2009, Section 7.10 (one-standard-error rule).
+15. OpenF1, free API of Formula 1 timing data. <https://openf1.org> (2026 races, accessed October 2026).
+16. E. B. Wilson, "Probable inference, the law of succession, and statistical inference", *Journal of the American Statistical Association* 22, 1927 (score interval).
