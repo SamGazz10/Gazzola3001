@@ -54,6 +54,14 @@ analytical solutions; the full model's braking-point error at the chosen step
 (0.05 s) is 0.059 ms; 16-point Gauss-Legendre quadrature is exact to
 round-off.
 
+Real-world check against 17 races of the 2026 season (OpenF1 timing data,
+1,222 on-track passes after removing the start, pit stops and safety cars):
+real top speeds respect the 355 km/h electrical-power limit, real acceleration
+matches the car model within about 10 km/h, and the circuit ranking agrees
+(rank correlation 0.65); but passes from 0.5-1 s behind are easier in the
+simulator than in real races, because real drivers ration battery energy over
+the lap (Section 5.4 of the documentation).
+
 ![What-if curves](reports/figures/what_if.png)
 
 ## Quick start
@@ -86,16 +94,20 @@ a warning.
 
 ## Reproducing the results
 
-Everything is generated from fixed random seeds; no data files are needed. The
-spreadsheet export is regenerated rather than stored in git because of its size.
+Everything is generated from fixed random seeds; no data files are needed,
+except for the real-data comparison, which downloads 2026 race data from
+OpenF1 once (about 4 minutes, internet needed) and caches it in `data/real/`.
+The spreadsheet export and the download cache are regenerated rather than
+stored in git because of their size.
 
 | Step | Command | Time (4-core CPU) | Output |
 |---|---|---|---|
 | Train the network and baselines | `python -m overtake.train` | ~4 min | `models/overtake_net.pt`, `reports/results/test_metrics.json` |
 | All experiments | `python -m overtake.experiments all` | ~20 min | `reports/results/*.json`, `reports/figures/*.png` |
-| One experiment | `python -m overtake.experiments solver` (or `timestep`, `quadrature`, `selection`, `ablation`, `comparison`, `performance`, `sensitivity`) | seconds to 10 min | |
-| Tests | `python -m pytest` | ~15 s | |
-| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~15 s | `reports/test_report.html` |
+| One experiment | `python -m overtake.experiments solver` (or `timestep`, `quadrature`, `selection`, `ablation`, `comparison`, `performance`, `sensitivity`, `real`) | seconds to 10 min | |
+| Comparison with real 2026 races | `python -m overtake.experiments real` | ~5 min first time (download), then ~1 min | `reports/results/real_data.json`, `reports/figures/real_*.png` |
+| Tests (64, all offline) | `python -m pytest` | ~20 s | |
+| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~20 s | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |
 | Spreadsheet of all simulation data | `python -m overtake.export` | ~2.5 min | `data/overtake_simulations.xlsx` (~65 MB, not in git) |
@@ -120,8 +132,9 @@ overtake/                 Python package
   predict.py              command-line and Python prediction
   experiments.py          verification, model selection, comparison, performance, sensitivity
   export.py               spreadsheet of every simulated attempt and every result
+  realdata.py             download of real 2026 race data (OpenF1) and comparison with the simulator
   plots.py                figures
-tests/                    pytest tests (physics, simulator, pipeline)
+tests/                    pytest tests (physics, simulator, pipeline, experiments, export, real data)
 notebooks/walkthrough.ipynb
 models/overtake_net.pt    trained ensemble of five networks (154 kB)
 reports/
