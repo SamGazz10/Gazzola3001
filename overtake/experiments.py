@@ -16,6 +16,7 @@ Each experiment writes ``reports/results/<name>.json`` and a figure in
 | `comparison` | Network vs logistic regression vs gradient boosting vs direct simulation, on the test set |
 | `performance` | Profiling, vectorisation, chunk size, FLOPs and memory |
 | `sensitivity` | One-at-a-time sensitivity, network vs simulator truth |
+| `real` | Comparison with real 2026 races from OpenF1 (speeds, overtakes, gaps) |
 
 ``comparison`` and ``sensitivity`` use the trained network in ``models/``,
 so run ``python -m overtake.train`` first.
@@ -552,6 +553,24 @@ def sensitivity():
                                   "test_wet_straights_treaded_tyres": wet_test})
 
 
+# --- 8. Real 2026 races -------------------------------------------------------
+
+def real():
+    """Compare the simulator with real 2026 races from OpenF1 (`overtake.realdata`).
+
+    Downloads and caches the data on first run (about 4 minutes), then works
+    offline. Writes ``reports/results/real_data.json`` and four figures.
+    """
+    from . import realdata
+    realdata.download()  # downloads once (about 4 minutes), then reads the cache
+    result = realdata.analyse()
+    plots.real_telemetry(result["telemetry"], FIGURES / "real_telemetry.png")
+    plots.real_gap(result["gap"], FIGURES / "real_gap.png")
+    plots.real_circuits(result, FIGURES / "real_circuits.png")
+    plots.real_speed_traps(result["speed_traps"], FIGURES / "real_speed_traps.png")
+    return _write("real_data", result)
+
+
 EXPERIMENTS = {
     "solver": solver,
     "timestep": timestep,
@@ -561,6 +580,7 @@ EXPERIMENTS = {
     "comparison": comparison,
     "performance": performance,
     "sensitivity": sensitivity,
+    "real": real,
 }
 
 
