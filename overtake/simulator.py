@@ -1,59 +1,74 @@
-"""Physics-informed Monte Carlo simulator of one overtaking attempt under the 2026 rules.
+"""Simulator of one overtaking attempt under the 2026 rules.
 
-There is no public dataset of 2026 overtakes that records battery state of
-charge and Boost / Overtake Mode usage, so the network is trained on attempts
-generated here. Each attempt is played out in two stages:
+No public dataset of 2026 overtakes records battery charge and Boost /
+Overtake Mode use, so the network is trained on attempts generated here. An
+attempt has two stages.
 
-1. Closing: how much of the gap the attacker removes before the braking point.
-   Electrical deployment (Boost, Overtake Mode, battery charge on both cars),
-   car straight-line speed, slipstream, corner-exit grip and dirty air all
-   contribute, plus random execution noise.
-2. Completion: if the attacker gets close enough to lunge, whether the move
-   sticks, which depends on the margin, driver ratings, braking grip, the
-   corner type, the weather and the circuit.
+**1. Closing (deterministic physics).** `overtake.physics` integrates both
+cars from the corner exit to the braking point and returns the gap the
+attacker still has to close, ``D`` (s). Tyres set grip and corner-exit speed,
+the battery and Boost / Overtake Mode set the electrical power, the slipstream
+cuts the attacker's drag, and car performance differences shift exit speed and
+drag. Poor-weather caution and the defender's positioning add to ``D``.
 
-Every constant is a simplified estimate chosen to give plausible magnitudes,
-not a value measured from F1 data. Change them to test other assumptions.
+**2. Execution (random).** Driver execution varies from attempt to attempt,
+modelled as Gaussian noise ``eps ~ N(0, sigma)`` on the deficit. The attacker
+can lunge if ``D - eps`` is within ``LUNGE_RANGE_S``; the margin is then
+``u = eps - (D - LUNGE_RANGE_S)``. A lunge sticks with probability
+``logistic(z0 + 5 min(u, 0.5))``, where ``z0`` collects driver ratings, braking
+grip, corner type, weather and circuit.
+
+Because the randomness is a single Gaussian variable, the exact probability of
+an overtake is a one-dimensional integral,
+
+    P = integral_0^inf  phi_sigma(u + D - LUNGE_RANGE_S) logistic(z0 + 5 min(u, 0.5)) du,
+
+which `probability` evaluates by Gauss-Legendre quadrature on [0, 0.5] and in
+closed form beyond. This gives a ground truth to validate the network
+against. `simulate` instead draws the random variables, producing the 0/1
+outcomes the network is trained on, exactly as real race data would look.
+
+Constants marked "estimate" are engineering judgements chosen to give
+plausible magnitudes, not values measured from F1 data.
 """
 import numpy as np
 import pandas as pd
+from scipy.special import expit, ndtr
 
 from .features import CIRCUITS, COMPOUNDS, CONDITIONS, LABEL, SEGMENTS
+from .physics import CarParameters, CarState, run_to_braking_point
 
-# 2026 power unit (approximate public figures).
-BATTERY_USABLE_MJ = 4.0         # usable energy at 100% state of charge
-MGUK_POWER_MJ_PER_S = 0.35      # 350 kW electrical deployment
-OVERTAKE_MODE_EXTRA_MJ = 0.5    # extra energy when within 1 s at the detection point
-STANDARD_MAP_SHARE = 0.55       # share of full deployment used on a straight without Boost
-FULL_DEPLOYMENT_DV = 14.0       # m/s end-of-run speed swing between full and zero deployment
-OVERTAKE_MODE_DV = 1.0          # m/s extra average speed from the Overtake Mode power profile
+CAR = CarParameters()
+BATTERY_USABLE_J = 4.0e6        # energy store window at 100 % charge (approx.)
+OVERTAKE_MODE_EXTRA_J = 0.5e6   # extra energy with Overtake Mode (2026 rules)
+STANDARD_MAP_SHARE = 0.55       # share of MGU-K power used without Boost (estimate)
+EXIT_SPEED_MPS = 33.0           # corner-exit speed onto the run, new softs, dry (estimate, ~120 km/h)
+DIRTY_AIR_GRIP_LOSS = 0.06      # grip lost in the exit corner when right behind another car (estimate)
+TOP_SPEED_REF_MPS = 92.0        # reference top speed for converting a speed advantage to drag
+LAP_TIME_REF_S = 90.0           # reference lap time for converting a pace advantage to exit speed
+TIME_STEP_S = 0.05              # ODE step (see experiments.timestep_study)
 
-LUNGE_RANGE_S = 0.25            # gap at the braking point from which a lunge is possible
+LUNGE_RANGE_S = 0.15            # deficit at the braking point from which a lunge is possible (estimate)
 MAX_MARGIN_S = 0.5
+MARGIN_LOGIT_PER_S = 5.0
 
-MEAN_SPEED = {"dry": 80.0, "damp": 72.0, "wet": 66.0}      # m/s along the run
-TRACTION = {"dry": 1.0, "damp": 0.7, "wet": 0.5}           # share of extra power that becomes speed
-TOW = {"dry": 1.0, "damp": 0.8, "wet": 0.6}                # attackers stay out of the spray when wet
-EXECUTION_SD = {"dry": 0.28, "damp": 0.32, "wet": 0.36}    # s, attempt-to-attempt variation
-CAUTION_S = {"dry": 0.0, "damp": 0.05, "wet": 0.12}       # time given away backing off in poor grip/visibility
+EXECUTION_SD = {"dry": 0.20, "damp": 0.24, "wet": 0.28}   # s (estimate)
+CAUTION_S = {"dry": 0.0, "damp": 0.05, "wet": 0.12}       # time given away for visibility/grip (estimate)
 CONDITION_LOGIT = {"dry": 0.0, "damp": -0.5, "wet": -0.9}
-DIRTY_AIR_S = {"straight": 0.03, "slow_corner": 0.04, "medium_corner": 0.07, "fast_corner": 0.12}
 SEGMENT_LOGIT = {"straight": 0.0, "slow_corner": 0.2, "medium_corner": -0.6, "fast_corner": -1.6}
 
-# Base grip of each compound on each surface (1.0 = new soft on a dry track).
+# Grip of each compound on each surface relative to a new soft on a dry track.
 GRIP = {
     "dry": {"soft": 1.000, "medium": 0.988, "hard": 0.976, "intermediate": 0.900, "wet": 0.860},
-    "damp": {"soft": 0.900, "medium": 0.890, "hard": 0.875, "intermediate": 0.950, "wet": 0.920},
-    "wet": {"soft": 0.700, "medium": 0.690, "hard": 0.680, "intermediate": 0.890, "wet": 0.930},
+    "damp": {"soft": 0.800, "medium": 0.790, "hard": 0.780, "intermediate": 0.860, "wet": 0.830},
+    "wet": {"soft": 0.550, "medium": 0.540, "hard": 0.530, "intermediate": 0.720, "wet": 0.760},
 }
 DEG_PER_LAP = {"soft": 0.0018, "medium": 0.0011, "hard": 0.0007, "intermediate": 0.0015, "wet": 0.0012}
 CLIFF_LAP = {"soft": 22, "medium": 35, "hard": 50, "intermediate": 25, "wet": 30}
 CLIFF_DEG_PER_LAP = 0.004
-GRIP_TO_PACE = 85.0             # s/lap per unit of grip (0.01 grip ~ 0.85 s/lap)
-EXIT_SHARE_OF_LAP = 0.06        # share of a lap spent in the corners leading onto the run
 
 # How readily a move sticks at each circuit once alongside (logit offset).
-# Rough estimates from track width, braking zones and overtaking history.
+# Estimates from track width, braking zones and overtaking history.
 PASSABILITY = {
     "generic": 0.0, "melbourne": -0.1, "shanghai": 0.4, "suzuka": -0.4, "bahrain": 0.6,
     "jeddah": 0.3, "miami": 0.1, "montreal": 0.4, "monaco": -2.5, "barcelona": -0.3,
@@ -65,12 +80,29 @@ assert set(PASSABILITY) == set(CIRCUITS)
 
 
 def _lookup(table, keys):
-    return pd.Series(keys).map(table).to_numpy(dtype=float)
+    return pd.Series(np.asarray(keys)).map(table).to_numpy(dtype=float)
 
 
 def tyre_grip(compound, age, condition, track_temp):
-    """Grip of a tyre after `age` laps, relative to a new soft on a dry track."""
+    """Grip of a tyre relative to a new soft on a dry track.
+
+    Parameters
+    ----------
+    compound, condition : array_like of str
+        Tyre compound and track condition per scenario.
+    age : array_like
+        Tyre age in laps.
+    track_temp : array_like
+        Track temperature, deg C. Hot tracks wear tyres faster; hard tyres
+        lose grip on a cold track.
+
+    Returns
+    -------
+    numpy.ndarray
+        Relative grip, about 0.5-1.0.
+    """
     compound, condition = np.asarray(compound), np.asarray(condition)
+    age, track_temp = np.asarray(age, dtype=float), np.asarray(track_temp, dtype=float)
     base = pd.Series(list(zip(condition, compound))).map(
         {(c, t): GRIP[c][t] for c in CONDITIONS for t in COMPOUNDS}
     ).to_numpy(dtype=float)
@@ -78,76 +110,217 @@ def tyre_grip(compound, age, condition, track_temp):
     # Treaded tyres overheat and wear quickly on a dry track.
     deg = np.where((condition == "dry") & np.isin(compound, ["intermediate", "wet"]), deg * 3, deg)
     wear = deg * age + CLIFF_DEG_PER_LAP * np.maximum(0, age - _lookup(CLIFF_LAP, compound))
-    # Hard tyres struggle to reach temperature on a cold track.
     cold_hard = (compound == "hard") & (track_temp < 25)
     return base - wear - 0.01 * cold_hard
 
 
-def simulate(df, rng):
-    """Play out one attempt per row. Returns a boolean array: did the overtake stick?"""
-    n = len(df)
+def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
+    """Stage 1: integrate both cars along the run for every scenario.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Scenarios in the `overtake.features` schema.
+    dt : float, optional
+        Integration time step, s.
+    method : {"rk4", "euler"}, optional
+    car : CarParameters, optional
+
+    Returns
+    -------
+    run : overtake.physics.RunResult
+        State at the braking point, including the deficit in seconds.
+    grip_a, grip_d : numpy.ndarray
+        Relative tyre grip of the attacker and defender.
+    """
     cond = df["track_condition"].to_numpy()
-    seg = df["segment"].to_numpy()
-    run = df["run_length_m"].to_numpy(dtype=float)
+    temp = df["track_temp_c"].to_numpy(dtype=float)
     gap = df["gap_s"].to_numpy(dtype=float)
-    soc_a = df["attacker_battery"].to_numpy(dtype=float) / 100
-    soc_d = df["defender_battery"].to_numpy(dtype=float) / 100
+    grip_a = tyre_grip(df["attacker_tyre"], df["attacker_tyre_age"], cond, temp)
+    grip_d = tyre_grip(df["defender_tyre"], df["defender_tyre_age"], cond, temp)
+
+    om = df["overtake_mode"].to_numpy(dtype=bool)
     boost_a = df["attacker_boost"].to_numpy(dtype=bool)
     boost_d = df["defender_boost"].to_numpy(dtype=bool)
-    om = df["overtake_mode"].to_numpy(dtype=bool)
+    speed_gain = df["top_speed_delta_kph"].to_numpy(dtype=float) / 3.6
+    # At fixed power, top speed scales with CdA^(-1/3).
+    cda_a = car.cda_m2 * (TOP_SPEED_REF_MPS / (TOP_SPEED_REF_MPS + speed_gain)) ** 3
+
+    attacker = CarState(
+        mu=car.mu_reference * grip_a,
+        cda_m2=cda_a,
+        deploy_share=np.where(boost_a, 1.0, STANDARD_MAP_SHARE),
+        energy_j=BATTERY_USABLE_J * df["attacker_battery"].to_numpy(dtype=float) / 100 + OVERTAKE_MODE_EXTRA_J * om,
+        overtake_mode=om,
+    )
+    defender = CarState(
+        mu=car.mu_reference * grip_d,
+        cda_m2=np.full(len(df), car.cda_m2),
+        deploy_share=np.where(boost_d, 1.0, STANDARD_MAP_SHARE),
+        energy_j=BATTERY_USABLE_J * df["defender_battery"].to_numpy(dtype=float) / 100,
+    )
+    # Corner speed scales with sqrt(grip); following closely costs grip (dirty
+    # air); a lap-time advantage is applied as a proportional speed advantage.
+    v0_d = EXIT_SPEED_MPS * np.sqrt(grip_d)
+    v0_a = (EXIT_SPEED_MPS * np.sqrt(grip_a * (1 - DIRTY_AIR_GRIP_LOSS * np.exp(-gap)))
+            * (1 + df["pace_delta_s"].to_numpy(dtype=float) / LAP_TIME_REF_S))
+    run = run_to_braking_point(df["run_length_m"].to_numpy(dtype=float), gap, v0_a, v0_d,
+                               attacker, defender, car, dt=dt, method=method)
+    return run, grip_a, grip_d
+
+
+def outcome_parameters(df, run, grip_a, grip_d):
+    """Stage 2 inputs: effective deficit, execution noise and completion logit.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Scenarios.
+    run : overtake.physics.RunResult
+        Output of `closing_run`.
+    grip_a, grip_d : numpy.ndarray
+        Relative tyre grip.
+
+    Returns
+    -------
+    deficit : numpy.ndarray
+        Deficit at the braking point including caution and defensive
+        positioning, s.
+    sigma : numpy.ndarray
+        Standard deviation of execution noise, s.
+    z0 : numpy.ndarray
+        Completion logit with zero margin.
+    """
+    cond = df["track_condition"].to_numpy()
     skill_a = df["attacker_skill"].to_numpy(dtype=float)
     skill_d = df["defender_skill"].to_numpy(dtype=float)
-    temp = df["track_temp_c"].to_numpy(dtype=float)
-
-    # Stage 1: closing.
-    speed = _lookup(MEAN_SPEED, cond)
-    traction = _lookup(TRACTION, cond)
-    energy_needed = MGUK_POWER_MJ_PER_S * run / speed + 1e-6  # MJ to run 350 kW all the way
-    energy_a = BATTERY_USABLE_MJ * soc_a + OVERTAKE_MODE_EXTRA_MJ * om
-    energy_d = BATTERY_USABLE_MJ * soc_d
-    share_a = np.minimum(np.where(boost_a, 1.0, STANDARD_MAP_SHARE), energy_a / energy_needed)
-    share_d = np.minimum(np.where(boost_d, 1.0, STANDARD_MAP_SHARE), energy_d / energy_needed)
-
-    s_per_mps = run / speed**2  # seconds gained over the run per m/s of extra average speed
-    gain_energy = s_per_mps * 0.5 * FULL_DEPLOYMENT_DV * traction * (share_a - share_d)
-    gain_energy *= rng.normal(1.0, 0.1, n)  # deployment efficiency varies lap to lap
-    gain_om = s_per_mps * OVERTAKE_MODE_DV * traction * om * np.minimum(1.0, run / 800)
-    gain_car = s_per_mps * 0.6 * df["top_speed_delta_kph"].to_numpy(dtype=float) / 3.6
-    gain_tow = 0.00022 * run * np.exp(-gap / 0.7) * _lookup(TOW, cond)
-
-    grip_a = tyre_grip(df["attacker_tyre"], df["attacker_tyre_age"].to_numpy(dtype=float), cond, temp)
-    grip_d = tyre_grip(df["defender_tyre"], df["defender_tyre_age"].to_numpy(dtype=float), cond, temp)
-    pace = GRIP_TO_PACE * (grip_a - grip_d) + df["pace_delta_s"].to_numpy(dtype=float)
-    gain_exit = EXIT_SHARE_OF_LAP * pace
-
-    loss_dirty_air = _lookup(DIRTY_AIR_S, seg) * np.exp(-gap)
-    loss_defence = 0.04 * (skill_d - 60) / 40
-    loss_caution = _lookup(CAUTION_S, cond)
-
-    closing = (gain_energy + gain_om + gain_car + gain_tow + gain_exit
-               - loss_dirty_air - loss_defence - loss_caution)
-    sd = _lookup(EXECUTION_SD, cond) + 0.04 * np.clip((90 - skill_a) / 30, 0, 1)
-    deficit = gap - closing - rng.normal(0.0, sd)  # gap left at the braking point
-    alongside = deficit <= LUNGE_RANGE_S
-
-    # Stage 2: completion.
-    margin = np.minimum(LUNGE_RANGE_S - deficit, MAX_MARGIN_S)
-    logit = (
+    deficit = run.deficit_s + _lookup(CAUTION_S, cond) + 0.04 * (skill_d - 60) / 40
+    sigma = _lookup(EXECUTION_SD, cond) + 0.04 * np.clip((90 - skill_a) / 30, 0, 1)
+    z0 = (
         0.5
-        + 5.0 * margin
         + 1.2 * (skill_a - skill_d) / 40
         + 25.0 * (grip_a - grip_d)
-        + _lookup(SEGMENT_LOGIT, seg)
+        + _lookup(SEGMENT_LOGIT, df["segment"])
         + _lookup(CONDITION_LOGIT, cond)
         + _lookup(PASSABILITY, df["circuit"])
-        - 0.2 * boost_d * soc_d  # a defender with energy left can fight back on the exit
+        # A defender with energy left can fight back on the exit.
+        - 0.2 * df["defender_boost"].to_numpy(dtype=float) * df["defender_battery"].to_numpy(dtype=float) / 100
     )
-    sticks = rng.random(n) < 1 / (1 + np.exp(-logit))
-    return alongside & sticks
+    return deficit, sigma, z0
+
+
+def overtake_integral(deficit, sigma, z0, rule="gauss", n=16):
+    """Probability of an overtake given the stage-2 parameters.
+
+    Evaluates ``P = int_0^inf phi_sigma(u + D - L) logistic(z0 + k min(u, m)) du``
+    (``L`` = lunge range, ``k`` = margin logit slope, ``m`` = margin cap). The
+    tail beyond ``u = m`` has a closed form; the integral over ``[0, m]`` is
+    computed numerically.
+
+    Parameters
+    ----------
+    deficit, sigma, z0 : numpy.ndarray
+        From `outcome_parameters`.
+    rule : {"gauss", "simpson", "trapezoid"}, optional
+        Quadrature rule for ``[0, m]``: Gauss-Legendre with ``n`` nodes, or
+        composite Simpson / trapezoid with ``n`` intervals (``n`` even for
+        Simpson).
+    n : int, optional
+
+    Returns
+    -------
+    numpy.ndarray
+        Probability in [0, 1].
+    """
+    deficit, sigma, z0 = (np.asarray(a, dtype=float)[..., None] for a in (deficit, sigma, z0))
+    shift = deficit - LUNGE_RANGE_S
+
+    if rule == "gauss":
+        nodes, weights = np.polynomial.legendre.leggauss(n)
+        u = 0.5 * MAX_MARGIN_S * (nodes + 1)
+        w = 0.5 * MAX_MARGIN_S * weights
+    else:
+        u = np.linspace(0, MAX_MARGIN_S, n + 1)
+        h = MAX_MARGIN_S / n
+        if rule == "trapezoid":
+            w = np.full(n + 1, h)
+            w[[0, -1]] = h / 2
+        elif rule == "simpson":
+            if n % 2:
+                raise ValueError("Simpson's rule needs an even number of intervals")
+            w = np.where(np.arange(n + 1) % 2, 4.0, 2.0) * h / 3
+            w[[0, -1]] = h / 3
+        else:
+            raise ValueError(f"unknown rule {rule!r}")
+
+    density = np.exp(-0.5 * ((u + shift) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
+    body = (density * expit(z0 + MARGIN_LOGIT_PER_S * u) * w).sum(axis=-1)
+    tail = expit(z0 + MARGIN_LOGIT_PER_S * MAX_MARGIN_S) * (1 - ndtr((MAX_MARGIN_S + shift) / sigma))
+    return body + tail[..., 0]
+
+
+def probability(df, dt=TIME_STEP_S):
+    """Exact probability of an overtake for each scenario (physics + quadrature).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Scenarios in the `overtake.features` schema.
+    dt : float, optional
+        ODE time step, s.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
+    run, grip_a, grip_d = closing_run(df, dt=dt)
+    return overtake_integral(*outcome_parameters(df, run, grip_a, grip_d))
+
+
+def draw_outcomes(deficit, sigma, z0, rng):
+    """Play out one attempt per scenario by drawing the random variables.
+
+    Parameters
+    ----------
+    deficit, sigma, z0 : numpy.ndarray
+        From `outcome_parameters`.
+    rng : numpy.random.Generator
+
+    Returns
+    -------
+    numpy.ndarray of bool
+        True where the overtake stuck.
+    """
+    eps = rng.normal(0.0, sigma)
+    margin = eps - (deficit - LUNGE_RANGE_S)
+    sticks = rng.random(margin.shape) < expit(z0 + MARGIN_LOGIT_PER_S * np.minimum(margin, MAX_MARGIN_S))
+    return (margin >= 0) & sticks
+
+
+def monte_carlo_probability(df, n_runs, seed=1):
+    """Estimate each scenario's probability by replaying it ``n_runs`` times.
+
+    Used to check `probability`; its standard error is ``sqrt(p (1-p) / n_runs)``.
+    """
+    rng = np.random.default_rng(seed)
+    params = outcome_parameters(df, *closing_run(df))
+    repeated = [np.repeat(a[:, None], n_runs, axis=1) for a in params]
+    return draw_outcomes(*repeated, rng).mean(axis=1)
 
 
 def sample_scenarios(n, rng):
-    """Draw `n` varied race situations covering the whole feature space."""
+    """Draw ``n`` varied race situations covering the whole input space.
+
+    Parameters
+    ----------
+    n : int
+    rng : numpy.random.Generator
+
+    Returns
+    -------
+    pandas.DataFrame
+        Scenarios in the `overtake.features` schema (no label).
+    """
     cond = rng.choice(CONDITIONS, n, p=[0.75, 0.13, 0.12])
     tyre_probs = {
         "dry": [0.30, 0.38, 0.26, 0.04, 0.02],
@@ -189,17 +362,32 @@ def sample_scenarios(n, rng):
     })
 
 
-def generate_dataset(n, seed=0):
-    """Sample `n` scenarios and simulate one attempt each, adding the `overtake` label."""
+def generate_dataset(n, seed=0, chunk=20_000):
+    """Sample ``n`` scenarios and simulate one attempt each.
+
+    Parameters
+    ----------
+    n : int
+        Number of attempts.
+    seed : int, optional
+    chunk : int, optional
+        Scenarios integrated together; bounds memory and keeps arrays
+        cache-friendly (see ``experiments.performance``).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Scenarios plus ``overtake`` (0/1 outcome) and ``p_true`` (exact
+        probability, for validation only - never a model input).
+    """
     rng = np.random.default_rng(seed)
     df = sample_scenarios(n, rng)
-    df[LABEL] = simulate(df, rng).astype(int)
+    labels, p_true = np.empty(n, dtype=int), np.empty(n)
+    for start in range(0, n, chunk):
+        part = df.iloc[start:start + chunk]
+        params = outcome_parameters(part, *closing_run(part))
+        labels[start:start + chunk] = draw_outcomes(*params, rng)
+        p_true[start:start + chunk] = overtake_integral(*params)
+    df[LABEL] = labels
+    df["p_true"] = p_true
     return df
-
-
-def true_probability(df, n_runs=400, seed=1):
-    """Ground-truth probability per row, estimated by replaying it `n_runs` times."""
-    rng = np.random.default_rng(seed)
-    df = df.reset_index(drop=True)
-    repeated = df.loc[df.index.repeat(n_runs)].reset_index(drop=True)
-    return simulate(repeated, rng).reshape(len(df), n_runs).mean(axis=1)

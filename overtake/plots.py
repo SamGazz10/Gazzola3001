@@ -13,7 +13,7 @@ INK_SECONDARY = "#52514e"
 MUTED = "#898781"
 GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
-SERIES = ["#2a78d6", "#eb6834"]                            # categorical slots 1-2
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]                 # categorical slots 1-3
 BATTERY_RAMP = ["#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]  # ordinal blue, low -> high charge
 
 plt.rcParams.update({

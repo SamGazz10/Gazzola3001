@@ -60,7 +60,7 @@ FEATURES = list(CATEGORICAL) + NUMERIC + BINARY
 LABEL = "overtake"
 
 # A typical attack: fresh softs, full battery, 1 s behind on an 800 m straight,
-# against a car on 15-lap-old mediums with half a battery that also uses Boost.
+# against a car on 15-lap-old mediums with 60% battery that also uses Boost.
 DEFAULTS = {
     "track_condition": "dry",
     "segment": "straight",
@@ -70,7 +70,7 @@ DEFAULTS = {
     "gap_s": 1.0,
     "run_length_m": 800.0,
     "attacker_battery": 100.0,
-    "defender_battery": 50.0,
+    "defender_battery": 60.0,
     "attacker_tyre_age": 5.0,
     "defender_tyre_age": 15.0,
     "track_temp_c": 35.0,
