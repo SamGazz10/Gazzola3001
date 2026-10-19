@@ -1,0 +1,108 @@
+{
+  "architectures": [
+    {
+      "label": "32",
+      "hidden": [
+        32
+      ],
+      "parameters": 1373,
+      "flops_per_prediction": 2497,
+      "epochs": 41,
+      "fit_seconds": 24.504737485000078,
+      "inference_us_per_prediction": 0.05853856666059679,
+      "val_log_loss": 0.26553139090538025,
+      "val_log_loss_se": 0.0029100871216586398,
+      "val_mae_vs_true": 0.031638080078143636,
+      "default_scenario_error": 0.045357765785009385
+    },
+    {
+      "label": "64-64",
+      "hidden": [
+        64,
+        64
+      ],
+      "parameters": 6717,
+      "flops_per_prediction": 13569,
+      "epochs": 57,
+      "fit_seconds": 48.4573485650003,
+      "inference_us_per_prediction": 0.1446781666648652,
+      "val_log_loss": 0.2586754560470581,
+      "val_log_loss_se": 0.0029267596277715636,
+      "val_mae_vs_true": 0.021477729802743997,
+      "default_scenario_error": 0.005288632741720201
+    },
+    {
+      "label": "128-128-64",
+      "hidden": [
+        128,
+        128,
+        64
+      ],
+      "parameters": 29629,
+      "flops_per_prediction": 60161,
+      "epochs": 55,
+      "fit_seconds": 77.7553110050003,
+      "inference_us_per_prediction": 0.34598856667192496,
+      "val_log_loss": 0.2589269280433655,
+      "val_log_loss_se": 0.0029577006112949692,
+      "val_mae_vs_true": 0.021626172173868457,
+      "default_scenario_error": 0.028462054363042832
+    },
+    {
+      "label": "256-256-128",
+      "hidden": [
+        256,
+        256,
+        128
+      ],
+      "parameters": 108221,
+      "flops_per_prediction": 218625,
+      "epochs": 25,
+      "fit_seconds": 63.333993662000466,
+      "inference_us_per_prediction": 1.256670966661962,
+      "val_log_loss": 0.2616787850856781,
+      "val_log_loss_se": 0.0030543083375621956,
+      "val_mae_vs_true": 0.027038868276733432,
+      "default_scenario_error": 0.084937574497015
+    }
+  ],
+  "lowest_log_loss": "64-64",
+  "threshold": 0.26160221567482966,
+  "selected": "64-64",
+  "selection_rule": "smallest network within one standard error of the lowest validation log loss",
+  "feature_ablation": {
+    "raw inputs only": {
+      "val_log_loss": 0.25942790508270264,
+      "val_mae_vs_true": 0.0218163422780062,
+      "default_scenario_error": -0.0675541738359623
+    },
+    "with energy-cover inputs": {
+      "val_log_loss": 0.2586754560470581,
+      "val_mae_vs_true": 0.021477729802743997,
+      "default_scenario_error": 0.005288632741720201
+    }
+  },
+  "default_scenario_truth": 0.47435921228811073,
+  "data_sizes": [
+    {
+      "train_size": 10000,
+      "val_log_loss": 0.2994060516357422,
+      "val_mae_vs_true": 0.06579366882535591
+    },
+    {
+      "train_size": 30000,
+      "val_log_loss": 0.27672091126441956,
+      "val_mae_vs_true": 0.04583609086694977
+    },
+    {
+      "train_size": 100000,
+      "val_log_loss": 0.2642056941986084,
+      "val_mae_vs_true": 0.030462482921489627
+    },
+    {
+      "train_size": 240000,
+      "val_log_loss": 0.2586754560470581,
+      "val_mae_vs_true": 0.021477729802743997
+    }
+  ]
+}

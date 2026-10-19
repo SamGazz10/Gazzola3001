@@ -1,0 +1,32 @@
+{
+  "test_attempts": 30000,
+  "models": {
+    "Neural network": {
+      "log_loss": 0.2552189826965332,
+      "brier": 0.080436110496521,
+      "roc_auc": 0.9484006884694318,
+      "accuracy": 0.8853666666666666,
+      "calibration_error": 0.0023921327091753486,
+      "mae_vs_true": 0.0223655032293534,
+      "max_error_vs_true": 0.605175868714027
+    },
+    "Logistic regression": {
+      "log_loss": 0.412646750819329,
+      "brier": 0.13167230411793698,
+      "roc_auc": 0.8525251983542573,
+      "accuracy": 0.8116666666666666,
+      "calibration_error": 0.004106991787818492,
+      "mae_vs_true": 0.15765498123653524,
+      "max_error_vs_true": 0.9898047351729378
+    },
+    "Gradient boosting": {
+      "log_loss": 0.26701364606584616,
+      "brier": 0.08348727911265391,
+      "roc_auc": 0.9444609082400813,
+      "accuracy": 0.8823666666666666,
+      "calibration_error": 0.014288613088581054,
+      "mae_vs_true": 0.03951165165135194,
+      "max_error_vs_true": 0.6282640183148703
+    }
+  }
+}
