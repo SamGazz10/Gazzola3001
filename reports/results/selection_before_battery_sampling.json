@@ -1,0 +1,85 @@
+{
+  "architectures": [
+    {
+      "label": "32",
+      "hidden": [
+        32
+      ],
+      "parameters": 1309,
+      "flops_per_prediction": 2369,
+      "epochs": 38,
+      "fit_seconds": 25.02897918000008,
+      "inference_us_per_prediction": 0.06290960000114865,
+      "val_log_loss": 0.26205936074256897,
+      "val_mae_vs_true": 0.03413448054704692
+    },
+    {
+      "label": "64-64",
+      "hidden": [
+        64,
+        64
+      ],
+      "parameters": 6589,
+      "flops_per_prediction": 13313,
+      "epochs": 40,
+      "fit_seconds": 38.20049422400007,
+      "inference_us_per_prediction": 0.12837736667279387,
+      "val_log_loss": 0.2554001212120056,
+      "val_mae_vs_true": 0.021774646697464428
+    },
+    {
+      "label": "128-128-64",
+      "hidden": [
+        128,
+        128,
+        64
+      ],
+      "parameters": 29373,
+      "flops_per_prediction": 59649,
+      "epochs": 40,
+      "fit_seconds": 92.96047507599997,
+      "inference_us_per_prediction": 0.2989419999873159,
+      "val_log_loss": 0.25582045316696167,
+      "val_mae_vs_true": 0.02182773605382143
+    },
+    {
+      "label": "256-256-128",
+      "hidden": [
+        256,
+        256,
+        128
+      ],
+      "parameters": 107709,
+      "flops_per_prediction": 217601,
+      "epochs": 21,
+      "fit_seconds": 63.88581773600026,
+      "inference_us_per_prediction": 1.136625466673043,
+      "val_log_loss": 0.2579374313354492,
+      "val_mae_vs_true": 0.02621575484120395
+    }
+  ],
+  "selected": "64-64",
+  "selection_rule": "lowest validation log loss",
+  "data_sizes": [
+    {
+      "train_size": 10000,
+      "val_log_loss": 0.30622515082359314,
+      "val_mae_vs_true": 0.0788923553491746
+    },
+    {
+      "train_size": 30000,
+      "val_log_loss": 0.2738385498523712,
+      "val_mae_vs_true": 0.05034068319115138
+    },
+    {
+      "train_size": 100000,
+      "val_log_loss": 0.26007798314094543,
+      "val_mae_vs_true": 0.03064182354843653
+    },
+    {
+      "train_size": 240000,
+      "val_log_loss": 0.2554001212120056,
+      "val_mae_vs_true": 0.021774646697464428
+    }
+  ]
+}

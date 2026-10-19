@@ -1,0 +1,110 @@
+{
+  "test_attempts": 30000,
+  "tyre_mismatch_share": 0.17576666666666665,
+  "models": {
+    "Neural network": {
+      "log_loss": 0.2552189826965332,
+      "brier": 0.080436110496521,
+      "roc_auc": 0.9484006884694318,
+      "accuracy": 0.8853666666666666,
+      "calibration_error": 0.0023921327091753486,
+      "mae_vs_true": 0.0223655032293534,
+      "max_error_vs_true": 0.605175868714027,
+      "fit_seconds": 33.09875242199769,
+      "predict_us_per_scenario": 3.5180845000013505,
+      "model_bytes": 26356
+    },
+    "Logistic regression": {
+      "log_loss": 0.412646750819329,
+      "brier": 0.13167230411793698,
+      "roc_auc": 0.8525251983542573,
+      "accuracy": 0.8116666666666666,
+      "calibration_error": 0.004106991787818492,
+      "mae_vs_true": 0.15765498123653524,
+      "max_error_vs_true": 0.9898047351729378,
+      "fit_seconds": 2.143894677999924,
+      "predict_us_per_scenario": 1.8566094000107114,
+      "model_bytes": 4194
+    },
+    "Gradient boosting": {
+      "log_loss": 0.26701364606584616,
+      "brier": 0.08348727911265391,
+      "roc_auc": 0.9444609082400813,
+      "accuracy": 0.8823666666666666,
+      "calibration_error": 0.014288613088581054,
+      "mae_vs_true": 0.03951165165135194,
+      "max_error_vs_true": 0.6282640183148703,
+      "fit_seconds": 3.9842712670001674,
+      "predict_us_per_scenario": 6.444152399990344,
+      "model_bytes": 1105088
+    },
+    "Direct simulation": {
+      "mae_vs_true": 0.0,
+      "predict_us_per_scenario": 102.75481909998234,
+      "note": "the ground truth itself; needs the physical model, so cannot learn from observed race outcomes"
+    }
+  },
+  "regions": {
+    "Neural network": {
+      "dry": 0.020937943960787662,
+      "damp": 0.029776504910886462,
+      "wet": 0.023177255533122963,
+      "straight": 0.02698132537398637,
+      "slow_corner": 0.018436795963120912,
+      "medium_corner": 0.01574879060880064,
+      "fast_corner": 0.01461935683563532,
+      "tyres_suit_surface": 0.020819948797339505,
+      "tyre_mismatch": 0.029613161364190142
+    },
+    "Logistic regression": {
+      "dry": 0.1490328238135974,
+      "damp": 0.1731403185076334,
+      "wet": 0.19500942966375376,
+      "straight": 0.20162155332593823,
+      "slow_corner": 0.11195558902273793,
+      "medium_corner": 0.10111286090447356,
+      "fast_corner": 0.09087674651711737,
+      "tyres_suit_surface": 0.13160747305220583,
+      "tyre_mismatch": 0.2798011475316068
+    },
+    "Gradient boosting": {
+      "dry": 0.03729839914394097,
+      "damp": 0.04707358204774263,
+      "wet": 0.045124215290578217,
+      "straight": 0.05132289932080336,
+      "slow_corner": 0.025419573074428384,
+      "medium_corner": 0.02362749597070685,
+      "fast_corner": 0.026223370866905252,
+      "tyres_suit_surface": 0.03490200364713644,
+      "tyre_mismatch": 0.06112795474261622
+    }
+  },
+  "error_quantiles": {
+    "Neural network": {
+      "q50": 0.008071266669037883,
+      "q90": 0.06300957408957969,
+      "q99": 0.1635692257373091,
+      "q99.9": 0.3028660711699067,
+      "q100": 0.605175868714027
+    },
+    "Logistic regression": {
+      "q50": 0.09811158658878008,
+      "q90": 0.3898515607629372,
+      "q99": 0.7685957520672465,
+      "q99.9": 0.9536191695067365,
+      "q100": 0.9898047351729378
+    },
+    "Gradient boosting": {
+      "q50": 0.018612346535112637,
+      "q90": 0.10377472883498529,
+      "q99": 0.25675245597410135,
+      "q99.9": 0.436319400760861,
+      "q100": 0.6282640183148703
+    }
+  },
+  "extrapolation_1300_2000m": {
+    "Neural network": 0.051235543130087165,
+    "Logistic regression": 0.26661196938115334,
+    "Gradient boosting": 0.09428992837875903
+  }
+}

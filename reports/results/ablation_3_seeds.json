@@ -1,0 +1,103 @@
+{
+  "hidden": [
+    64,
+    64
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "runs": {
+    "raw inputs only": [
+      {
+        "seed": 0,
+        "epochs": 53,
+        "val_log_loss": 0.25942790508270264,
+        "val_mae_vs_true": 0.0218163422780062,
+        "default_scenario_error": -0.0675541738359623,
+        "battery_axis_max_error": 0.06755420363828468
+      },
+      {
+        "seed": 1,
+        "epochs": 46,
+        "val_log_loss": 0.2597791254520416,
+        "val_mae_vs_true": 0.023232047116825843,
+        "default_scenario_error": -0.018374172815530776,
+        "battery_axis_max_error": 0.10724922819718824
+      },
+      {
+        "seed": 2,
+        "epochs": 47,
+        "val_log_loss": 0.2592366635799408,
+        "val_mae_vs_true": 0.021692683534118587,
+        "default_scenario_error": -0.013243792423456191,
+        "battery_axis_max_error": 0.08674686952218519
+      }
+    ],
+    "with energy-cover inputs": [
+      {
+        "seed": 0,
+        "epochs": 57,
+        "val_log_loss": 0.2586754560470581,
+        "val_mae_vs_true": 0.021477729802743997,
+        "default_scenario_error": 0.005288632741720201,
+        "battery_axis_max_error": 0.14935710656449078
+      },
+      {
+        "seed": 1,
+        "epochs": 44,
+        "val_log_loss": 0.25970155000686646,
+        "val_mae_vs_true": 0.02251773572910162,
+        "default_scenario_error": 0.028834464183599473,
+        "battery_axis_max_error": 0.10622501003548382
+      },
+      {
+        "seed": 2,
+        "epochs": 39,
+        "val_log_loss": 0.25877463817596436,
+        "val_mae_vs_true": 0.021539259384066242,
+        "default_scenario_error": -0.03615578807279396,
+        "battery_axis_max_error": 0.07130163713082777
+      }
+    ]
+  },
+  "summary": {
+    "raw inputs only": {
+      "val_log_loss": {
+        "mean": 0.2594812313715617,
+        "sd": 0.00027513449526257776
+      },
+      "val_mae_vs_true": {
+        "mean": 0.02224702430965021,
+        "sd": 0.0008552925342986974
+      },
+      "default_scenario_error": {
+        "mean": -0.033057379691649756,
+        "sd": 0.029985026353467704
+      },
+      "battery_axis_max_error": {
+        "mean": 0.08718343378588604,
+        "sd": 0.019851112939839034
+      }
+    },
+    "with energy-cover inputs": {
+      "val_log_loss": {
+        "mean": 0.25905054807662964,
+        "sd": 0.0005659610486178705
+      },
+      "val_mae_vs_true": {
+        "mean": 0.021844908305303955,
+        "sd": 0.0005834972399292703
+      },
+      "default_scenario_error": {
+        "mean": -0.0006775637158247619,
+        "sd": 0.0329033409734472
+      },
+      "battery_axis_max_error": {
+        "mean": 0.10896125124360079,
+        "sd": 0.03909960791477484
+      }
+    }
+  }
+}

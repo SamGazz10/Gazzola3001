@@ -1,0 +1,150 @@
+{
+  "hidden": [
+    64,
+    64
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "default_scenario_truth": 0.47435921228811073,
+  "raw inputs only": {
+    "runs": [
+      {
+        "seed": 0,
+        "epochs": 53,
+        "val_log_loss": 0.25942790508270264,
+        "val_mae_vs_true": 0.0218163422780062,
+        "default_scenario_error": -0.0675541738359623,
+        "battery_axis_max_error": 0.06755420363828468
+      },
+      {
+        "seed": 1,
+        "epochs": 46,
+        "val_log_loss": 0.2597791254520416,
+        "val_mae_vs_true": 0.023232047116825843,
+        "default_scenario_error": -0.018374172815530776,
+        "battery_axis_max_error": 0.10724922819718824
+      },
+      {
+        "seed": 2,
+        "epochs": 47,
+        "val_log_loss": 0.2592366635799408,
+        "val_mae_vs_true": 0.021692683534118587,
+        "default_scenario_error": -0.013243792423456191,
+        "battery_axis_max_error": 0.08674686952218519
+      },
+      {
+        "seed": 3,
+        "epochs": 49,
+        "val_log_loss": 0.25989726185798645,
+        "val_mae_vs_true": 0.02272327035727756,
+        "default_scenario_error": -0.05576258696004677,
+        "battery_axis_max_error": 0.05576264656469154
+      },
+      {
+        "seed": 4,
+        "epochs": 55,
+        "val_log_loss": 0.2590688467025757,
+        "val_mae_vs_true": 0.02238459121989982,
+        "default_scenario_error": -0.01798605717107582,
+        "battery_axis_max_error": 0.07079806728944288
+      }
+    ],
+    "single_model": {
+      "val_log_loss": {
+        "mean": 0.25948196053504946,
+        "sd": 0.0003516169092276949
+      },
+      "val_mae_vs_true": {
+        "mean": 0.0223697869012256,
+        "sd": 0.0006390290137542543
+      },
+      "default_scenario_error": {
+        "mean": -0.03458415664121437,
+        "sd": 0.025145673440910885
+      },
+      "battery_axis_max_error": {
+        "mean": 0.0776222030423585,
+        "sd": 0.01991729027797174
+      }
+    },
+    "ensemble_of_5": {
+      "val_log_loss": 0.258462518453598,
+      "val_mae_vs_true": 0.020218746206997044,
+      "default_scenario_error": -0.03458415664121439,
+      "battery_axis_max_error": 0.07364886804208265
+    }
+  },
+  "with energy-cover inputs": {
+    "runs": [
+      {
+        "seed": 0,
+        "epochs": 57,
+        "val_log_loss": 0.2586754560470581,
+        "val_mae_vs_true": 0.021477729802743997,
+        "default_scenario_error": 0.005288632741720201,
+        "battery_axis_max_error": 0.14935710656449078
+      },
+      {
+        "seed": 1,
+        "epochs": 44,
+        "val_log_loss": 0.25970155000686646,
+        "val_mae_vs_true": 0.02251773572910162,
+        "default_scenario_error": 0.028834464183599473,
+        "battery_axis_max_error": 0.10622501003548382
+      },
+      {
+        "seed": 2,
+        "epochs": 39,
+        "val_log_loss": 0.25877463817596436,
+        "val_mae_vs_true": 0.021539259384066242,
+        "default_scenario_error": -0.03615578807279396,
+        "battery_axis_max_error": 0.07130163713082777
+      },
+      {
+        "seed": 3,
+        "epochs": 45,
+        "val_log_loss": 0.25876644253730774,
+        "val_mae_vs_true": 0.02147574165857596,
+        "default_scenario_error": -0.0010421255914859762,
+        "battery_axis_max_error": 0.11798944699570416
+      },
+      {
+        "seed": 4,
+        "epochs": 41,
+        "val_log_loss": 0.2588134706020355,
+        "val_mae_vs_true": 0.02185107567561398,
+        "default_scenario_error": 0.019216658702642442,
+        "battery_axis_max_error": 0.18438624965950726
+      }
+    ],
+    "single_model": {
+      "val_log_loss": {
+        "mean": 0.25894631147384645,
+        "sd": 0.00042521146407983694
+      },
+      "val_mae_vs_true": {
+        "mean": 0.021772308450020362,
+        "sd": 0.0004446645962371782
+      },
+      "default_scenario_error": {
+        "mean": 0.003228368392736436,
+        "sd": 0.024924341301441853
+      },
+      "battery_axis_max_error": {
+        "mean": 0.12585189007720274,
+        "sd": 0.0430160696185743
+      }
+    },
+    "ensemble_of_5": {
+      "val_log_loss": 0.257992684841156,
+      "val_mae_vs_true": 0.0196738044825001,
+      "default_scenario_error": 0.003228368392736436,
+      "battery_axis_max_error": 0.12551429498001812
+    }
+  }
+}

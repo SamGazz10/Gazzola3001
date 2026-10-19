@@ -1,0 +1,100 @@
+{
+  "profile_top_functions": [
+    {
+      "function": "physics.py:acceleration",
+      "calls": 4512,
+      "own_seconds": 0.43887502300000003,
+      "share": 0.25785611983788026
+    },
+    {
+      "function": "physics.py:run_to_braking_point",
+      "calls": 1,
+      "own_seconds": 0.20466045400000002,
+      "share": 0.12024596476682835
+    },
+    {
+      "function": "physics.py:rk4_step",
+      "calls": 389,
+      "own_seconds": 0.20067573100000002,
+      "share": 0.11790478525657684
+    },
+    {
+      "function": "physics.py:mguk_power_limit",
+      "calls": 4512,
+      "own_seconds": 0.17595739500000002,
+      "share": 0.10338180291358534
+    },
+    {
+      "function": "physics.py:slipstream_factor",
+      "calls": 2256,
+      "own_seconds": 0.138772681,
+      "share": 0.08153433936056992
+    },
+    {
+      "function": "_methods.py:_clip",
+      "calls": 17547,
+      "own_seconds": 0.10173774000000001,
+      "share": 0.05977487326152781
+    },
+    {
+      "function": "physics.py:_hermite",
+      "calls": 3500,
+      "own_seconds": 0.080576466,
+      "share": 0.04734180298296192
+    },
+    {
+      "function": "shape_base.py:stack",
+      "calls": 2257,
+      "own_seconds": 0.072217905,
+      "share": 0.04243082378857694
+    }
+  ],
+  "vectorisation_200_scenarios": {
+    "loop_seconds": 10.83645643499949,
+    "vectorised_seconds": 0.22987512500003504,
+    "speedup": 47.1406222617512
+  },
+  "chunk_size_40k_scenarios": [
+    {
+      "chunk": 1000,
+      "seconds": 14.018309609000426
+    },
+    {
+      "chunk": 5000,
+      "seconds": 4.85193729599996
+    },
+    {
+      "chunk": 20000,
+      "seconds": 3.0873454550001043
+    },
+    {
+      "chunk": 40000,
+      "seconds": 3.0004101390004507
+    }
+  ],
+  "flops": {
+    "network_hidden": [
+      64,
+      64
+    ],
+    "network_members": 5,
+    "network_flops_per_prediction": 66565,
+    "network_gflops_achieved": 81.19851521589725,
+    "network_us_per_prediction_batch_10k": 0.8197809999728634,
+    "simulation_mean_rk4_steps": 153.3369399499436,
+    "simulation_flops_per_scenario_estimate": 68601.60133777496,
+    "simulation_gflops_achieved": 0.6871816858562271,
+    "simulation_us_per_scenario": 99.83036909998191,
+    "network_arithmetic_intensity_flop_per_byte": {
+      "1": 0.504601413020407,
+      "64": 30.324876854303692,
+      "1024": 251.4815306739865,
+      "10000": 446.21190792207966
+    }
+  },
+  "memory": {
+    "network_parameter_bytes": 131780,
+    "dataset_300k_bytes": 115198461,
+    "ode_state_bytes_per_20k_chunk": 960000
+  }
+}
