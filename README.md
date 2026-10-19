@@ -86,7 +86,8 @@ a warning.
 
 ## Reproducing the results
 
-Everything is generated from fixed random seeds; no data files are needed.
+Everything is generated from fixed random seeds; no data files are needed. The
+spreadsheet export is regenerated rather than stored in git because of its size.
 
 | Step | Command | Time (4-core CPU) | Output |
 |---|---|---|---|
@@ -97,6 +98,7 @@ Everything is generated from fixed random seeds; no data files are needed.
 | Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~15 s | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |
+| Spreadsheet of all simulation data | `python -m overtake.export` | ~2.5 min | `data/overtake_simulations.xlsx` (~65 MB, not in git) |
 
 `comparison`, `performance` and `sensitivity` use the trained model, so run
 `python -m overtake.train` first.
@@ -117,6 +119,7 @@ overtake/                 Python package
   baselines.py            logistic regression, gradient-boosted trees
   predict.py              command-line and Python prediction
   experiments.py          verification, model selection, comparison, performance, sensitivity
+  export.py               spreadsheet of every simulated attempt and every result
   plots.py                figures
 tests/                    pytest tests (physics, simulator, pipeline)
 notebooks/walkthrough.ipynb

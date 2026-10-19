@@ -17,6 +17,7 @@ Modules, in workflow order:
 | `overtake.predict` | Command-line and Python prediction |
 | `overtake.experiments` | Verification, model selection, comparison, performance, sensitivity |
 | `overtake.plots` | Figures |
+| `overtake.export` | Spreadsheet of every simulated attempt and every result |
 
 See the README and `docs/project_documentation.md` in the repository for the
 full write-up.

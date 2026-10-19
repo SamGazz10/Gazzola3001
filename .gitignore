@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated spreadsheet of simulation data (python -m overtake.export)
+data/
