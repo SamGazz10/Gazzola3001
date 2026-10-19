@@ -71,6 +71,10 @@ class CarParameters:
         Fractional drag reduction for a car directly behind another.
     tow_length_m : float
         Distance over which the slipstream benefit decays by a factor e.
+    car_length_m : float
+        Over this distance the slipstream fades out as the follower draws
+        alongside, so drag changes continuously (a sudden change would
+        reduce the integrator to first-order accuracy).
     energy_smoothing_j : float
         MGU-K power is ramped to zero over the last ``energy_smoothing_j`` of
         available energy rather than cut instantly, which keeps the right-hand
@@ -89,6 +93,7 @@ class CarParameters:
     driven_axle_share: float = 0.55
     tow_max: float = 0.25
     tow_length_m: float = 20.0
+    car_length_m: float = 5.5
     energy_smoothing_j: float = 20e3
 
 
@@ -206,17 +211,21 @@ def slipstream_factor(separation_m, car=CarParameters()):
     Parameters
     ----------
     separation_m : numpy.ndarray
-        Distance from the following car to the car ahead, m. Negative values
-        (the follower is ahead) give no slipstream.
+        Distance from the following car to the car ahead, m. Negative when the
+        follower has drawn alongside or ahead.
     car : CarParameters, optional
 
     Returns
     -------
     numpy.ndarray
-        ``1 - tow_max * exp(-separation / tow_length)`` for positive separation.
+        ``1 - tow_max * exp(-separation / tow_length)`` behind the other car,
+        fading linearly to 1 over one car length as the follower draws
+        alongside.
     """
     sep = np.asarray(separation_m)
-    return np.where(sep > 0, 1.0 - car.tow_max * np.exp(-np.maximum(sep, 0.0) / car.tow_length_m), 1.0)
+    behind = np.exp(-np.maximum(sep, 0.0) / car.tow_length_m)
+    alongside = np.clip(1.0 + sep / car.car_length_m, 0.0, 1.0)
+    return 1.0 - car.tow_max * np.where(sep >= 0, behind, alongside)
 
 
 def two_car_rhs(y, attacker, defender, car=CarParameters()):

@@ -221,7 +221,8 @@ def main(argv=None):
     (args.reports / "results" / "test_metrics.json").write_text(json.dumps(results, indent=2))
     plots.training_curve(history, args.reports / "figures" / "training_curve.png")
     plots.calibration(y, predictions, args.reports / "figures" / "calibration.png")
-    plots.what_if(predictor, args.reports / "figures" / "what_if.png")
+    exact = (lambda s: simulator.probability(pd.DataFrame(s))) if args.data is None else None
+    plots.what_if(predictor.predict, args.reports / "figures" / "what_if.png", exact=exact)
 
     print(json.dumps(results, indent=2))
     print(f"saved model to {args.out} and results to {args.reports}/")
