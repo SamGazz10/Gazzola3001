@@ -106,10 +106,11 @@ stored in git because of their size.
 | All experiments | `python -m overtake.experiments all` | ~20 min | `reports/results/*.json`, `reports/figures/*.png` |
 | One experiment | `python -m overtake.experiments solver` (or `timestep`, `quadrature`, `selection`, `ablation`, `comparison`, `performance`, `sensitivity`, `real`) | seconds to 10 min | |
 | Comparison with real 2026 races | `python -m overtake.experiments real` | ~5 min first time (download), then ~1 min | `reports/results/real_data.json`, `reports/figures/real_*.png` |
-| Tests (64, all offline) | `python -m pytest` | ~20 s | |
-| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~20 s | `reports/test_report.html` |
+| Tests (66, all offline) | `python -m pytest` | ~30 s | |
+| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~30 s | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |
+| The network by hand | `jupyter notebook notebooks/network_by_hand.ipynb` | seconds | one prediction recomputed from the saved weights with NumPy, checked against the library |
 | Spreadsheet of all simulation data | `python -m overtake.export` | ~2.5 min | `data/overtake_simulations.xlsx` (~65 MB, not in git) |
 
 `comparison`, `performance` and `sensitivity` use the trained model, so run
@@ -134,8 +135,10 @@ overtake/                 Python package
   export.py               spreadsheet of every simulated attempt and every result
   realdata.py             download of real 2026 race data (OpenF1) and comparison with the simulator
   plots.py                figures
-tests/                    pytest tests (physics, simulator, pipeline, experiments, export, real data)
-notebooks/walkthrough.ipynb
+tests/                    pytest tests (physics, simulator, pipeline, experiments, export, real data, notebooks)
+notebooks/
+  walkthrough.ipynb       the workflow end to end
+  network_by_hand.ipynb   the trained network's arithmetic, step by step
 models/overtake_net.pt    trained ensemble of five networks (154 kB)
 reports/
   figures/                every figure in the documentation
