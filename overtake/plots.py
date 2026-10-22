@@ -186,10 +186,7 @@ def calibration(y, curves, path, bins=10):
         Number of equal-width bins on [0, 1].
     """
     fig, ax = plt.subplots(figsize=(4.8, 4.4))
-    ax.plot([0, 1], [0, 1], color=MUTED, linewidth=1, linestyle="--")
-    # Rotated by eye to lie along the dashed diagonal at this figure size.
-    ax.annotate("Perfect calibration", (0.62, 0.62), rotation=38, color=MUTED,
-                xytext=(0, 6), textcoords="offset points", ha="center")
+    ax.plot([0, 1], [0, 1], color=MUTED, linewidth=1, linestyle="--", label="Perfect calibration")
     edges = np.linspace(0, 1, bins + 1)
     for (label, p), color in zip(curves.items(), SERIES):
         # Same binning as `overtake.train.expected_calibration_error`; the clip puts p = 1 in the last bin.
@@ -259,8 +256,9 @@ def what_if(predict, path, exact=None, base=None):
     left.annotate(f"Default scenario: {p_base:.0%}", (base["gap_s"], p_base), xytext=(10, 0),
                   textcoords="offset points", va="center", color=INK)
     left.axvline(1.0, color=AXIS, linewidth=1)
-    left.annotate("Overtake Mode limit (1 s)", (1.0, 0.62), xytext=(6, 0), textcoords="offset points",
-                  va="center", color=MUTED)
+    # Right of the line, between the legend and the default-scenario label, where no curve reaches.
+    left.annotate("Overtake Mode\nlimit (1 s)", (1.0, 0.535), xytext=(6, 0), textcoords="offset points",
+                  ha="left", va="center", color=MUTED, fontsize=11)
     left.set_xlabel("Gap to the car ahead (s)")
     left.set_ylabel("P(overtake)")
     left.set_title("Gap and attacker battery charge")
@@ -275,7 +273,7 @@ def what_if(predict, path, exact=None, base=None):
     right.set_title(f"Straight length, {base['gap_s']:g} s gap")
     right.legend(loc="upper left")
     if exact is not None:
-        right.annotate("Solid: neural network\nDashed: simulator truth", (0.02, 0.80),
+        right.annotate("Solid: neural network\nDashed: simulator truth", (0.02, 0.62),
                        xycoords="axes fraction", ha="left", va="top", color=MUTED)
     _save(fig, path)
 
@@ -356,11 +354,13 @@ def timestep(results, path, chosen_dt):
         left.loglog(dt, results["rk4_linear_crossing"]["max_error_s"], color=SERIES[0], linewidth=1,
                     linestyle="--", label="RK4, linear crossing")
     i = list(dt).index(chosen_dt)  # exact match: the chosen step must be one of the studied steps
-    for ax, x in ((left, chosen_dt), (right, results["rk4"]["seconds"][i])):
+    # Label below-right of the point on the left panel (the curves rise to the right there), left of it on the right.
+    for ax, x, offset, ha, va in ((left, chosen_dt, (8, -10), "left", "top"),
+                                  (right, results["rk4"]["seconds"][i], (-10, 0), "right", "center")):
         ax.plot([x], [results["rk4"]["max_error_s"][i]], marker="o", markersize=10, color=SERIES[0],
                 markeredgecolor=SURFACE, markeredgewidth=2, zorder=5)
-        ax.annotate(f"chosen: dt = {chosen_dt} s", (x, results["rk4"]["max_error_s"][i]), xytext=(-10, 0),
-                    textcoords="offset points", ha="right", va="center", color=INK)
+        ax.annotate(f"chosen: dt = {chosen_dt} s", (x, results["rk4"]["max_error_s"][i]), xytext=offset,
+                    textcoords="offset points", ha=ha, va=va, color=INK)
         ax.axhline(1e-3, color=AXIS, linewidth=1)  # 1 ms limit on the deficit error
     left.annotate("1 ms acceptance limit", (dt.min(), 1e-3), xytext=(0, 4), textcoords="offset points",
                   ha="left", color=MUTED)
@@ -368,7 +368,7 @@ def timestep(results, path, chosen_dt):
     left.set_xlabel("Time step (s)")
     left.set_ylabel("Max deficit error (s)")
     left.set_title("Accuracy of the braking-point deficit")
-    left.legend(loc="lower right")
+    left.legend(loc="upper left")
     right.set_xlabel("Run time for the test scenarios (s)")
     right.set_title("Cost against accuracy")
     right.legend(loc="upper right")
@@ -523,8 +523,8 @@ def method_comparison(regions, path):
         values = [100 * regions[model][r] for r in names]
         # Offset each model's bar from the region's tick so the group is centred; 0.92 leaves a gap between bars.
         ax.bar(x + (i - (len(models) - 1) / 2) * width, values, width * 0.92, color=color, label=model)
-    # First underscore -> line break, the rest -> spaces: "tyres_suit_surface" -> "tyres\nsuit surface".
-    ax.set_xticks(x, [n.replace("_", "\n", 1).replace("_", " ") for n in names])
+    # Every underscore -> line break: "tyres_suit_surface" -> "tyres\nsuit\nsurface".
+    ax.set_xticks(x, [n.replace("_", "\n") for n in names])
     ax.set_ylabel("Mean error vs truth (points)")
     ax.set_title("Error by operating region (test set)")
     ax.legend(loc="upper left")
@@ -655,7 +655,7 @@ def rules(results, path):
     # The titles state the 2026 value held fixed in the other panel (`overtake.physics.TAPER_OVERTAKE_MODE_KPH`,
     # `overtake.physics.OVERTAKE_MODE_EXTRA_J`); they are typed in, not read from ``results``.
     left.set_title("Extra energy (taper start 337 km/h)")
-    left.legend(loc="center right")
+    left.legend(loc="upper left")
     right.set_xlabel("Speed where electrical power starts to taper (km/h)")
     right.set_title("Taper start (extra energy 0.5 MJ)")
     _percent_axis(left)  # also applies to the right panel (shared y)
@@ -787,7 +787,7 @@ def real_gap(result, path):
     right.axvline(1.0, color=AXIS, linewidth=1)
     right.set_xlabel("Gap at the start of the lap (s)")
     right.set_ylabel("Laps with an on-track pass (%)")
-    right.set_title(f"Real 2026 races ({result['driver_laps']:,} driver-laps, 95 % intervals)")
+    right.set_title(f"Real 2026 races ({result['driver_laps']:,} driver-laps)")
     right.set_ylim(0, None)
     _save(fig, path)
 
@@ -810,7 +810,7 @@ def real_circuits(result, path):
         Output PNG.
     """
     rows = [r for r in result["races"] if r.get("passability") is not None]
-    fig, ax = plt.subplots(figsize=(7.5, 4.6))
+    fig, ax = plt.subplots(figsize=(9, 5.4))
     ax.plot([r["passability"] for r in rows], [r["on_track_per_lap"] for r in rows], linestyle="none",
             color=SERIES[0], **{**MARKER, "markersize": 7})
     c = result["circuits"]
@@ -853,16 +853,16 @@ def real_speed_traps(rows, path):
     ax.plot([r["p99"] for r in rows], y, linestyle="none", color=SERIES[1], label="99th percentile", **MARKER)
     ax.plot([r["max"] for r in rows], y, linestyle="none", marker="|", markersize=10, markeredgewidth=2,
             color=INK, label="Fastest reading")
-    # Labels sit left of their lines, low down, where the slow circuits leave the plot empty. The two speeds
-    # are the Overtake Mode taper, `overtake.physics.TAPER_OVERTAKE_MODE_KPH`, typed in.
-    for x, row, label in ((337, 0.5, "337 km/h: full power\nends with Overtake Mode"),
-                          (355, 1.5, "355 km/h: electric\npower reaches zero")):
+    # The two speeds of the Overtake Mode taper (`overtake.physics.TAPER_OVERTAKE_MODE_KPH`, typed in),
+    # labelled just above the plot so the labels never sit on data.
+    for x, label, ha in ((337, "337: full power\nends (Overtake Mode)", "right"),
+                         (355, "355: electric\npower zero", "center")):
         ax.axvline(x, color=AXIS, linewidth=1)
-        ax.annotate(label, (x, row), xytext=(-4, 0), textcoords="offset points", ha="right", va="center",
-                    color=MUTED, fontsize=10)
+        ax.annotate(label, (x, 1.0), xycoords=("data", "axes fraction"), xytext=(0, 3),
+                    textcoords="offset points", ha=ha, va="bottom", color=MUTED, fontsize=10)
     ax.set_yticks(y, [r["race"] for r in rows])
     ax.set_xlabel("Highest speed per lap from the timing points (km/h)")
-    ax.set_title("Speed traps, every 2026 race lap")
+    ax.set_title("Speed traps, every 2026 race lap", pad=34)
     ax.legend(loc="upper left")
     ax.grid(axis="y", visible=False)
     _save(fig, path)
@@ -883,7 +883,7 @@ def workflow_diagram(path):
     path : str or pathlib.Path
         Output PNG.
     """
-    # Sized for the full text width of an A4 page (about 6.9 in), so the text prints at about 7-8.5 pt.
+    # Sized for the full text width of an A4 page (about 6.9 in), so the text prints at about 7-8 pt.
     fig, ax = plt.subplots(figsize=(7.2, 2.75))
     # Boxes are laid out in data units on a 10 x 3.6 canvas.
     ax.set_xlim(0, 10)
@@ -895,8 +895,8 @@ def workflow_diagram(path):
         """Draw a rounded box with a bold title and a smaller description; return its extent ``(x, y, w, h)``."""
         ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
                                     facecolor=tint[kind], edgecolor=AXIS, linewidth=0.8))
-        ax.text(x + w / 2, y + h - 0.12, title, ha="center", va="top", fontsize=9, fontweight="bold", color=INK)
-        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=7.6, color=INK_SECONDARY,
+        ax.text(x + w / 2, y + h - 0.12, title, ha="center", va="top", fontsize=8.4, fontweight="bold", color=INK)
+        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=7.0, color=INK_SECONDARY,
                 linespacing=1.3)
         return (x, y, w, h)
 
@@ -906,7 +906,7 @@ def workflow_diagram(path):
         ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=10,
                                      color=INK_SECONDARY, linewidth=0.9))
         if label:
-            ax.text((x0 + x1) / 2, (y0 + y1) / 2 + 0.08 + dy, label, ha="center", va="bottom", fontsize=7.8,
+            ax.text((x0 + x1) / 2, (y0 + y1) / 2 + 0.08 + dy, label, ha="center", va="bottom", fontsize=7.2,
                     color=INK_SECONDARY)
 
     # Top row: the simulator and the network; bottom row: the exact probability, the prediction and the checks.
