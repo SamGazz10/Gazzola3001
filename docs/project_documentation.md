@@ -66,13 +66,13 @@ form the *default scenario* used throughout this report.
 | Input | Meaning and units | Accepted (trained) | Default |
 |---|---|---|---|
 | `gap_s` | gap at the corner exit, s | 0-3 (0.05-2.0) | 1.0 |
-| `run_length_m` | corner exit to braking point, m | 10-2000 (250-1300 straights, 50-300 corners) | 800 |
+| `run_length_m` | corner exit to braking point, m | 10-2000 (250-1300 straights, 50-300 corners) | 800 (150 into a corner) |
 | `attacker_battery`, `defender_battery` | state of charge, % | 0-100 | 100, 60 |
 | `attacker_boost`, `defender_boost` | Boost used, flag | true/false or 1/0 | true, true |
 | `overtake_mode` | within 1 s at the detection point, flag | true/false or 1/0 | `gap_s` ≤ 1 |
 | `attacker_tyre`, `defender_tyre` | soft, medium, hard, intermediate, wet | listed | soft, medium |
 | `attacker_tyre_age`, `defender_tyre_age` | laps | 0-80 (0-40) | 5, 15 |
-| `track_condition`, `track_temp_c` | dry, damp or wet; °C | listed; 0-70 (10-55) | dry, 35 |
+| `track_condition`, `track_temp_c` | dry, damp or wet; °C | listed; 0-70 (10-55) | dry, 35 (20 damp or wet) |
 | `segment` | where the move completes: straight, slow, medium or fast corner | listed | straight |
 | `circuit` | one of 24 circuits, or `generic` | listed | generic |
 | `attacker_skill`, `defender_skill` | driver rating | 0-100 (60-100) | 85, 85 |
@@ -87,7 +87,8 @@ command-line tool also reports it without Boost and at other gaps.
 outside the accepted range, text where a number is expected, a non-boolean
 flag or a missing column raises a `ValueError` naming the field and the
 allowed values (the command line prints it and exits with status 2). Omitted
-or `None` fields take their defaults. Values accepted but outside the training
+or `None` fields take their defaults; NaN and unknown field names are
+rejected, and a pandas Series counts as one scenario. Values accepted but outside the training
 range are predicted with an extrapolation warning (Section 5.2 measures the
 cost), and a missing model file raises a `FileNotFoundError` explaining how to
 train one. Every function's inputs, outputs and exceptions are documented in

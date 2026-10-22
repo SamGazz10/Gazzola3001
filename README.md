@@ -88,7 +88,10 @@ predictor.predict({"track_condition": "dry", "attacker_tyre": "soft",
                    "segment": "straight", "attacker_battery": 100, "gap_s": 1.0})
 ```
 
-Fields left out take the defaults in `overtake/features.py`. Invalid inputs
+Fields left out (or set to `None`) take the defaults in `overtake/features.py`;
+the run length (800 m on a straight, 150 m into a corner) and track temperature
+(35 °C dry, 20 °C damp or wet) depend on the segment and weather. A pandas
+Series counts as one scenario. Invalid inputs, NaN and unknown field names
 raise a `ValueError` naming the field; inputs outside the training range give
 a warning.
 

@@ -104,6 +104,57 @@ def test_command_line_rejects_bad_input(capsys, predictor, tmp_path):
     assert "gap_s" in capsys.readouterr().err
 
 
+def test_corner_run_length_defaults_to_150_m(predictor):
+    corner = {"segment": "slow_corner"}
+    assert predictor.predict(corner) == pytest.approx(predictor.predict({**corner, "run_length_m": 150.0}))
+
+
+def test_wet_track_temperature_defaults_to_20_c():
+    from overtake.predict import complete
+    assert complete({"track_condition": "wet"})["track_temp_c"].iloc[0] == 20.0
+    assert complete({"track_condition": "dry"})["track_temp_c"].iloc[0] == DEFAULTS["track_temp_c"]
+
+
+def test_series_is_one_scenario_and_returns_a_float(predictor):
+    scenario = {"gap_s": 0.6, "attacker_battery": 70.0}
+    p = predictor.predict(pd.Series(scenario))
+    assert isinstance(p, float) and p == pytest.approx(predictor.predict(scenario))
+
+
+def test_unknown_field_is_rejected(predictor):
+    with pytest.raises(ValueError, match="unknown field"):
+        predictor.predict({"gap": 1.0})
+
+
+def test_nan_is_rejected_not_filled(predictor):
+    with pytest.raises(ValueError, match="gap_s"):
+        predictor.predict({"gap_s": float("nan")})
+
+
+@pytest.mark.parametrize("scenario, field", [
+    ({"segment": "slow_corner", "run_length_m": 800.0}, "run_length_m"),
+    ({"track_condition": "wet", "track_temp_c": 45.0}, "track_temp_c"),
+    ({"gap_s": 1.9, "overtake_mode": True}, "overtake_mode"),
+])
+def test_situational_extrapolation_is_flagged(predictor, scenario, field):
+    warnings = predictor.out_of_range(scenario)
+    assert len(warnings) == 1 and field in warnings[0]
+
+
+def test_command_line_rejects_nan(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        predict_module.main(["--gap", "nan"])
+    assert exit_info.value.code == 2
+    assert "not a finite number" in capsys.readouterr().err
+
+
+def test_command_line_missing_model_exits_with_message(capsys, tmp_path):
+    with pytest.raises(SystemExit) as exit_info:
+        predict_module.main(["--model", str(tmp_path / "missing.pt")])
+    assert exit_info.value.code == 1
+    assert "overtake.train" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("physics, width", [(True, 16), (False, 14)])
 def test_preprocessor_shapes_and_standardisation(data, physics, width):
     train_df = data[0]
