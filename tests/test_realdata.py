@@ -16,14 +16,17 @@ OFFSET = {1: 0.0, 2: 0.5, 3: 1.5}  # drivers cross the line in order 1, 2, 3
 
 
 def iso(seconds):
+    """ISO 8601 time ``seconds`` after the race start, as OpenF1 writes it."""
     return (START + pd.Timedelta(seconds=seconds)).isoformat()
 
 
 def at(seconds):
+    """The same moment as a timezone-naive UTC Timestamp, as realdata stores times."""
     return pd.Timestamp(iso(seconds)).tz_localize(None)
 
 
 def lap_start(driver, lap):
+    """Start time (s after the race start) of ``lap`` for ``driver``, on 90 s laps."""
     return LAP_S * (lap - 1) + OFFSET[driver]
 
 
@@ -45,6 +48,7 @@ OVERTAKES = [
 
 
 def interval(driver, seconds, gap):
+    """One OpenF1 interval row: ``driver``'s gap to the car ahead at a moment."""
     return {"driver_number": driver, "date": iso(seconds), "interval": gap}
 
 
@@ -58,6 +62,7 @@ INTERVALS = (
 
 
 def test_lap_at_finds_the_lap_a_moment_falls_in():
+    """A moment belongs to the lap that started last before it; an unknown driver gives None."""
     index = realdata.lap_index(LAPS)
     assert realdata.lap_at(index, 1, at(45)) == 1  # before lap 2 starts
     assert realdata.lap_at(index, 2, at(lap_start(2, 3))) == 3
@@ -66,10 +71,12 @@ def test_lap_at_finds_the_lap_a_moment_falls_in():
 
 
 def test_neutralised_periods_from_race_control():
+    """Overtake-disabled and safety-car periods are read from race control, whatever the message order."""
     assert realdata.neutralised_periods(RACE_CONTROL) == [(at(-60), at(30)), (at(290), at(330))]
 
 
 def test_red_flag_lasts_until_overtake_mode_returns_and_open_periods_run_to_the_end():
+    """A red flag ends only at OVERTAKE ENABLED, and a period still open at the end runs to the race end."""
     messages = [{"date": iso(0), "message": "RED FLAG - RACE SUSPENDED"},
                 {"date": iso(100), "message": "TRACK CLEAR"},           # not the restart
                 {"date": iso(900), "message": "OVERTAKE ENABLED"},
@@ -78,6 +85,7 @@ def test_red_flag_lasts_until_overtake_mode_returns_and_open_periods_run_to_the_
 
 
 def test_every_position_change_gets_a_reason():
+    """Each position change is labelled start, neutralised, pit stop or on track; only on-track ones are kept."""
     labelled = realdata.classify_overtakes(OVERTAKES, LAPS, PITS, RACE_CONTROL)
     assert labelled["reason"].tolist() == ["start", "on track", "pit stop", "neutralised", "pit stop", "on track"]
     kept = realdata.on_track_overtakes(OVERTAKES, LAPS, PITS, RACE_CONTROL)
@@ -86,11 +94,13 @@ def test_every_position_change_gets_a_reason():
 
 
 def test_no_overtakes_gives_an_empty_table():
+    """A race without position changes gives an empty table with the usual columns, not an error."""
     kept = realdata.on_track_overtakes([], LAPS, PITS)
     assert kept.empty and {"time", "lap", "reason"} <= set(kept.columns)
 
 
 def test_driver_laps_get_the_gap_at_lap_start_and_whether_they_passed():
+    """Each eligible driver-lap gets its lap-start gap and a pass flag; lap 1, pit and neutralised laps drop out."""
     passes = realdata.on_track_overtakes(OVERTAKES, LAPS, PITS, RACE_CONTROL)
     table = realdata.laps_by_gap(LAPS, INTERVALS, PITS, passes, RACE_CONTROL)
     got = set(table.itertuples(index=False, name=None))
@@ -102,6 +112,7 @@ def test_driver_laps_get_the_gap_at_lap_start_and_whether_they_passed():
 
 
 def test_wilson_interval_known_value_and_zero_successes():
+    """The Wilson interval matches a textbook value and stays inside [0, 1] with no successes."""
     low, high = realdata.wilson_interval(5, 10)
     assert (low, high) == pytest.approx((0.2366, 0.7634), abs=1e-4)
     low, high = realdata.wilson_interval(0, 10)
@@ -109,6 +120,7 @@ def test_wilson_interval_known_value_and_zero_successes():
 
 
 def test_rate_by_gap_bins_and_counts():
+    """Pass rates are counted per gap bin, empty bins have no rate, and each rate lies inside its interval."""
     rows = realdata.rate_by_gap([0.1, 0.2, 0.6, 2.5], [True, False, True, False], bins=[0, 0.5, 1, 3, 4])
     assert [r["n"] for r in rows] == [2, 1, 1, 0]
     assert [r["rate"] for r in rows] == [0.5, 1.0, 0.0, None]
@@ -118,6 +130,7 @@ def test_rate_by_gap_bins_and_counts():
 
 
 def test_full_throttle_runs_finds_the_straight_and_integrates_distance():
+    """A long full-throttle stretch is found, a short burst ignored, and distance integrated exactly."""
     t = np.arange(0, 20, 0.25)
     speed = np.where(t <= 10, 200 + 10 * t, 150.0)  # 10 s straight, 200 -> 300 km/h, then a corner
     throttle = np.where(t <= 10, 100, 40)
@@ -133,6 +146,7 @@ def test_full_throttle_runs_finds_the_straight_and_integrates_distance():
 
 
 def test_simulated_runs_order_by_electric_power_and_respect_the_limit():
+    """More electrical power gives more speed, the 355 km/h cut-off holds, and an empty battery equals no deployment."""
     ends = {share: realdata.simulate_run(250, 15, share)["kph"].iloc[-1] for share in (1.0, 0.55, 0.0)}
     assert ends[1.0] > ends[0.55] > ends[0.0]
     assert realdata.simulate_run(250, 60, 1.0)["kph"].max() < 355
@@ -146,6 +160,7 @@ def offline(tmp_path, monkeypatch):
     calls = []
 
     def no_network(url, timeout=None):
+        """Stand-in for urlopen: records the URL and answers 404, as OpenF1 does."""
         calls.append(url)
         raise urllib.error.HTTPError(url, 404, "No results found", None, None)
 
@@ -156,6 +171,7 @@ def offline(tmp_path, monkeypatch):
 
 
 def test_fetch_reads_the_cache_without_the_network(offline):
+    """A cached response is returned without any request."""
     cache, calls = offline
     (cache / "laps_session_key-1.json").write_text(json.dumps([{"lap_number": 2}]))
     assert realdata.fetch("laps", session_key=1) == [{"lap_number": 2}]
@@ -163,6 +179,7 @@ def test_fetch_reads_the_cache_without_the_network(offline):
 
 
 def test_fetch_treats_404_as_no_data_and_caches_it(offline):
+    """A 404 means no data: it returns an empty list and is cached, so the second call makes no request."""
     _, calls = offline
     assert realdata.fetch("laps", session_key=7) == []
     assert realdata.fetch("laps", session_key=7) == []
@@ -170,6 +187,7 @@ def test_fetch_treats_404_as_no_data_and_caches_it(offline):
 
 
 def test_completed_races_keeps_past_grands_prix_only(offline):
+    """Only Grand Prix races held before the cut-off date are kept, not sprints or future races."""
     cache, _ = offline
     sessions = [{"session_name": "Race", "date_start": "2026-03-08T04:00:00+00:00", "session_key": 1},
                 {"session_name": "Sprint", "date_start": "2026-03-14T03:00:00+00:00", "session_key": 2},

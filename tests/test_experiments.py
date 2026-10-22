@@ -7,12 +7,14 @@ from overtake.features import DEFAULTS
 
 
 def test_flop_count_matches_layer_sizes():
+    """The FLOP count used in the report matches a hand count for the 33-64-64-1 network."""
     # 33 inputs -> 64 -> 64 -> 1: multiply-adds (2 FLOPs), bias adds and ~5 FLOPs per SiLU.
     expected = (2 * 33 * 64 + 64) + (2 * 64 * 64 + 64) + (2 * 64 * 1 + 1) + 5 * (64 + 64)
     assert nn_flops((64, 64), 33) == expected
 
 
 def test_tyre_mismatch_rule():
+    """Slicks on a damp or wet track, or treaded tyres in the dry, count as tyres unsuited to the surface."""
     df = pd.DataFrame([
         DEFAULTS,                                                                      # slicks, dry
         {**DEFAULTS, "attacker_tyre": "intermediate"},                                 # treaded, dry

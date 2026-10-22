@@ -14,5 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize("name", ["network_by_hand.ipynb", "walkthrough.ipynb"])
 def test_notebook_runs(name):
+    """The notebook executes without error from a fresh kernel."""
     notebook = nbformat.read(ROOT / "notebooks" / name, as_version=4)
     NotebookClient(notebook, timeout=300, resources={"metadata": {"path": str(ROOT)}}).execute()

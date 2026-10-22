@@ -3,8 +3,12 @@
     python -m overtake.experiments all
     python -m overtake.experiments solver timestep      # a subset
 
-Each experiment writes ``reports/results/<name>.json`` and a figure in
-``reports/figures/``.
+``all``, also the default when no name is given, runs every experiment in
+the table below except ``figures``, in table order. Every experiment except
+``diagram`` and ``figures`` saves its numbers as
+``reports/results/<name>.json`` (``real_data.json`` for ``real``). All except
+``adaptive``, ``ablation``, ``baselines`` and ``performance`` also draw
+figures in ``reports/figures/``.
 
 | Name | What it does |
 |---|---|
@@ -18,7 +22,7 @@ Each experiment writes ``reports/results/<name>.json`` and a figure in
 | `rules` | Sensitivity of the exact probability to the Overtake Mode rules (energy and taper) |
 | `selection` | Network size and training-set size, on the validation set |
 | `ablation` | Physics-informed inputs and five-network ensembles, five seeds |
-| `baselines` | Tuning of the two baseline models on the validation set |
+| ``baselines`` (`tune_baselines`) | Tuning of the two baseline models on the validation set |
 | `comparison` | Network vs logistic regression vs gradient boosting vs direct simulation, on the test set |
 | `performance` | Profiling, vectorisation, chunk size, FLOPs and memory |
 | `sensitivity` | One-at-a-time sensitivity, network vs simulator truth |
@@ -26,8 +30,12 @@ Each experiment writes ``reports/results/<name>.json`` and a figure in
 | `diagram` | The workflow overview figure |
 | `figures` | Redraw the figures whose data are saved in ``reports/results`` (no recomputation) |
 
-``comparison`` and ``sensitivity`` use the trained network in ``models/``,
-so run ``python -m overtake.train`` first.
+``baselines``, ``comparison``, ``performance`` and ``sensitivity`` load the
+trained network from ``models/``, so run ``python -m overtake.train`` first.
+The experiments that train or score models share one simulated dataset per
+process (`dataset`): with the defaults, the same 300,000 attempts and the
+same split that ``python -m overtake.train`` uses, so the test set is unseen
+by the saved network.
 """
 import contextlib
 import cProfile
@@ -52,29 +60,49 @@ from .predict import DEFAULT_MODEL, OvertakePredictor
 from .train import REPORTS, metrics, split, train_network
 
 FIGURES, RESULTS = REPORTS / "figures", REPORTS / "results"
+# Seed of the shared dataset, its split and the models trained here; 0 matches python -m overtake.train.
 SEED = 0
 
 
 def _write(name, result):
     """Save ``result`` as ``reports/results/<name>.json`` and return it unchanged."""
     RESULTS.mkdir(parents=True, exist_ok=True)
+    # default=float converts the NumPy scalars json cannot serialise (int64, float32, bool_).
     (RESULTS / f"{name}.json").write_text(json.dumps(result, indent=2, default=float))
     return result
 
 
 def _timed(func, repeats=3):
-    """Best wall-clock time of ``repeats`` calls, and the last result."""
+    """Best wall-clock time (s) of ``repeats`` calls of ``func``, and the last call's result."""
     best = float("inf")
     for _ in range(repeats):
         start = time.perf_counter()
         out = func()
+        # The fastest run is the one least disturbed by other work on the machine.
         best = min(best, time.perf_counter() - start)
     return best, out
 
 
 @functools.lru_cache(maxsize=None)
 def dataset(n=300_000, seed=SEED):
-    """Simulated attempts, cached so experiments share one dataset."""
+    """Simulated attempts, generated once per process and shared by the experiments.
+
+    The cache returns the same DataFrame object to every caller, so callers
+    must not modify it in place.
+
+    Parameters
+    ----------
+    n : int, optional
+        Number of attempts. The default matches ``python -m overtake.train``.
+    seed : int, optional
+        Seed of `overtake.simulator.generate_dataset`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Scenarios in the `overtake.features` schema plus the 0/1 ``overtake``
+        label and the exact probability ``p_true``.
+    """
     return simulator.generate_dataset(n, seed=seed)
 
 
@@ -107,45 +135,64 @@ def _patched(module, **values):
 
 
 def nn_flops(hidden, n_inputs=None):
-    """Floating-point operations for one network prediction.
+    """Floating-point operations for one prediction by one network.
 
     Counts a multiply-add as 2 FLOPs, a bias add as 1 and a SiLU activation as
     about 5 (exponential, add, divide, multiply). Embedding look-ups are memory
-    reads, not arithmetic.
+    reads, not arithmetic, and dropout is inactive at inference, so neither is
+    counted.
 
     Parameters
     ----------
     hidden : tuple of int
+        Width of each hidden layer, e.g. ``(64, 64)``.
     n_inputs : int, optional
-        Width of the first layer's input (embeddings + numeric inputs).
+        Width of the first layer's input (embeddings + numeric inputs). By
+        default that of an `overtake.model.OvertakeNet` on the raw inputs
+        without the derived energy-cover inputs: 33 (19 embedding values,
+        11 numbers and 3 flags).
 
     Returns
     -------
     int
+        FLOPs per prediction for a single network; multiply by the number of
+        ensemble members for the whole predictor.
+
+    Examples
+    --------
+    >>> nn_flops((64, 64))
+    13313
     """
     if n_inputs is None:
         n_inputs = OvertakeNet(hidden).mlp[0].in_features
+    # Layer widths from input to the single output logit; consecutive pairs are the linear layers.
     widths = [n_inputs, *hidden, 1]
     linear = sum(2 * a * b + b for a, b in zip(widths[:-1], widths[1:]))
     return linear + 5 * sum(hidden)
 
 
-# Hand count of the arithmetic in physics.two_car_rhs: about 35 FLOPs per car
-# in `acceleration` plus about 20 for the slipstream (an exponential counted
-# as ~10). RK4 adds 4 right-hand-side evaluations and ~14 vector operations
-# per state variable per step.
+# Hand count (estimates) of the arithmetic per scenario, for the simulator's
+# FLOP rate in `performance`. physics.two_car_rhs: about 35 FLOPs per car in
+# `acceleration` plus about 20 for the slipstream (an exponential counted as
+# ~10). An RK4 step makes 4 right-hand-side evaluations plus ~14 element-wise
+# operations (stage sums and the weighted update) on each of the 6 state rows.
 FLOPS_PER_RHS = 2 * 35 + 20
 FLOPS_PER_RK4_STEP = 4 * FLOPS_PER_RHS + 6 * 14
-FLOPS_QUADRATURE = 16 * 30 + 40  # 16 Gauss nodes (density + logistic) and the closed-form tail
+# 16 Gauss nodes at ~30 FLOPs each (normal density + logistic) and ~40 for the closed-form tail (estimates).
+FLOPS_QUADRATURE = 16 * 30 + 40
 
 
 # --- 1. Solver verification -------------------------------------------------
 
 def _single_car(car):
+    """Right-hand side ``f([x, v, e])`` of one car on its own, with grip and electrical power switched off."""
+    # A huge friction coefficient removes the traction limit, and no deployment or energy removes the
+    # MGU-K, so only the engine power and the resistances in ``car`` act.
     state = CarState(mu=np.array([1e9]), cda_m2=np.array([car.cda_m2]),
                      deploy_share=np.array([0.0]), energy_j=np.array([0.0]))
 
     def f(y):
+        """Time derivative of the single-car state [position m, speed m/s, energy used J]."""
         accel, ers = acceleration(y[1:2], y[2:3], state, state.cda_m2, car)
         return np.array([y[1], accel[0], ers[0]])
     return f
@@ -154,18 +201,32 @@ def _single_car(car):
 def solver():
     """Verify Euler and RK4 on two special cases of the car model with exact solutions.
 
-    * Constant power ``P``, no resistance: ``v^2 = v0^2 + 2 P t / m`` and
-      ``x = m / (3P) (v^3 - v0^3)``.
-    * Drag only: ``v = v0 / (1 + k v0 t / m)`` and ``x = (m / k) ln(1 + k v0 t / m)``.
+    * Constant power ``P``, no resistance (``m dv/dt = P / v``):
+      ``v^2 = v0^2 + 2 P t / m`` and ``x = m / (3P) (v^3 - v0^3)``.
+    * Drag only (``m dv/dt = -k v^2`` with ``k = rho CdA / 2``):
+      ``v = v0 / (1 + k v0 t / m)`` and ``x = (m / k) ln(1 + k v0 t / m)``.
 
-    The observed order of convergence is the slope of log(error) against
-    log(dt) over the smallest steps.
+    Both start at 30 m/s and run for 12.8 s, a whole number of every step
+    tested (0.8 s halving down to 0.0125 s). The observed order of
+    convergence is the slope of log(error) against log(dt) where the error
+    is in its asymptotic regime and above round-off: the four smallest steps
+    for Euler, and 0.4-0.05 s for RK4, whose drag-only errors at the two
+    smallest steps are near double-precision round-off.
+
+    Returns
+    -------
+    dict
+        Per problem: the steps, the exact final position (m), the absolute
+        final-position error (m) of each method at each step, and each
+        method's observed order.
     """
     m, p, k, v0, t_end = 800.0, 500e3, 0.6, 30.0, 12.8
     power_only = replace(CarParameters(), mass_kg=m, ice_power_w=p, cda_m2=0.0, cla_m2=0.0,
                          rolling_coeff=0.0, drivetrain_efficiency=1.0)
+    # CdA chosen so that 1/2 rho CdA equals k with rho = 1.2 kg/m^3.
     drag_only = replace(power_only, ice_power_w=0.0, cda_m2=2 * k / 1.2, air_density=1.2)
     problems = {
+        # (v0^2 + 2 P t / m)^1.5 is v^3 at t_end.
         "Constant power, no drag": (power_only, m / (3 * p) * ((v0**2 + 2 * p * t_end / m) ** 1.5 - v0**3)),
         "Drag only, no power": (drag_only, m / k * np.log(1 + k * v0 * t_end / m)),
     }
@@ -174,9 +235,13 @@ def solver():
     for title, (car, x_exact) in problems.items():
         r = {"dt": dts, "exact_position_m": x_exact}
         for method in ("euler", "rk4"):
+            # Index 0 of the final state is the position; the state starts at [x = 0, v = v0, e = 0].
             r[method] = [abs(integrate(_single_car(car), [0.0, v0, 0.0], dt, int(round(t_end / dt)), method)[0]
                              - x_exact) for dt in dts]
-            tail = slice(-4, None) if method == "euler" else slice(1, 5)  # asymptotic, above round-off
+            # Euler: the four smallest steps (at larger ones its constant-power error is not yet
+            # asymptotic). RK4: 0.4-0.05 s,
+            # leaving out the two smallest steps, whose drag-only errors are near round-off.
+            tail = slice(-4, None) if method == "euler" else slice(1, 5)
             r[method + "_order"] = float(np.polyfit(np.log(dts[tail]), np.log(r[method][tail]), 1)[0])
         out[title] = r
     plots.convergence(out, FIGURES / "solver_convergence.png")
@@ -220,11 +285,20 @@ def timestep(n=2000, dts=(0.4, 0.2, 0.1, 0.05, 0.025, 0.0125), reference_dt=0.00
     -------
     dict
         Per method: worst and mean deficit error (s) and run time (s) per
-        step, and the observed order; the same errors for RK4 with linear
-        crossing; and the Euler-equivalent steps and cost ratios.
+        step, and the observed order of the mean and of the worst error; the
+        same for RK4 with linear crossing; and, for each Euler target, the
+        target error (s), the step needed (s) and its run time relative to
+        RK4 at the chosen step.
+
+    Raises
+    ------
+    ValueError
+        If ``dts`` does not contain the simulator's step,
+        `overtake.simulator.TIME_STEP_S`.
     """
     df = simulator.sample_scenarios(n, np.random.default_rng(7))
     reference = simulator.closing_run(df, dt=reference_dt)[0].deficit_s
+    # The small tolerance keeps a step equal to fit_max_dt despite floating-point representation.
     fit = [i for i, dt in enumerate(dts) if dt <= fit_max_dt + 1e-12]
     log_dt = np.log(np.asarray(dts)[fit])
     out = {"dt": list(dts), "reference_dt": reference_dt, "scenarios": n, "fit_dt": [dts[i] for i in fit]}
@@ -232,12 +306,14 @@ def timestep(n=2000, dts=(0.4, 0.2, 0.1, 0.05, 0.025, 0.0125), reference_dt=0.00
                                    ("rk4_linear_crossing", "rk4", "linear")):
         rows = {"max_error_s": [], "mean_error_s": [], "seconds": []}
         for dt in dts:
+            # closing_run returns (run, grip_a, grip_d); only the run is needed.
             seconds, (run, _, _) = _timed(
                 lambda: simulator.closing_run(df, dt=dt, method=method, crossing=crossing), repeats=2)
             err = np.abs(run.deficit_s - reference)
             rows["max_error_s"].append(float(err.max()))
             rows["mean_error_s"].append(float(err.mean()))
             rows["seconds"].append(seconds)
+        # Observed order: slope of log(error) against log(dt) over the fitted steps.
         for key, errors in (("observed_order", "mean_error_s"), ("observed_order_max_error", "max_error_s")):
             rows[key] = float(np.polyfit(log_dt, np.log(np.asarray(rows[errors])[fit]), 1)[0])
         out[name] = rows
@@ -247,10 +323,12 @@ def timestep(n=2000, dts=(0.4, 0.2, 0.1, 0.05, 0.025, 0.0125), reference_dt=0.00
     chosen = list(dts).index(simulator.TIME_STEP_S)
     p, c = np.polyfit(log_dt, np.log(np.asarray(out["euler"]["max_error_s"])[fit]), 1)
     finest = int(np.argmin(dts))
+    # Seconds x step at the finest step, where the fixed per-run overheads matter least.
     euler_seconds_times_dt = out["euler"]["seconds"][finest] * dts[finest]
     rk4_seconds = out["rk4"]["seconds"][chosen]
     out["euler_equivalent"] = {}
     for key, target in (("for_1ms", 1e-3), ("to_match_rk4", out["rk4"]["max_error_s"][chosen])):
+        # Invert the power law: dt = exp((log(err) - c) / p).
         dt_needed = float(np.exp((np.log(target) - c) / p))
         out["euler_equivalent"][key] = {"target_error_s": float(target), "dt_s": dt_needed,
                                         "cost_vs_rk4": float(euler_seconds_times_dt / dt_needed / rk4_seconds)}
@@ -330,6 +408,7 @@ def stability(dts=(0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.3), batter
                          deploy_share=np.array([share]), energy_j=np.array([battery_j]))
 
         def f(y, state=state):
+            """One car alone, state [x, v, e]; ``state`` is bound here so each deployment keeps its own."""
             accel, ers = acceleration(y[1:2], y[2:3], state, state.cda_m2, car)
             return np.array([y[1], accel[0], ers[0]])
 
@@ -404,13 +483,16 @@ def adaptive(n=100, rtols=(1e-3, 1e-6, 1e-9), reference_dt=0.001, timing_n=20_00
     scale = np.array([1.0, 1.0, 1e3, 1.0, 1.0, 1e3])
 
     def deficit(i, rtol):
+        """Deficit (s) at the braking point of scenario ``i`` from ``solve_ivp``, and its RHS evaluations."""
         attacker, defender = ic["attacker"].take([i]), ic["defender"].take([i])
         length = ic["length"][i]
 
         def rhs(t, y):
+            """Two-car right-hand side for one scenario in the (t, y) form ``solve_ivp`` expects."""
             return two_car_rhs(y[:, None], attacker, defender, simulator.CAR)[:, 0]
 
         def braking_point(t, y):
+            """Event function: zero when the defender reaches the braking point."""
             return y[3] - length
         braking_point.terminal, braking_point.direction = True, 1
 
@@ -506,7 +588,9 @@ def speed_trace(distances_m=(400, 800, 1300), duration_s=120.0):
     -------
     dict
         ``exit_speed_kph``; per deployment the speed (km/h) at each distance,
-        the peak speed and the speed after ``duration_s``; and both cars'
+        the peak speed, the speed after ``duration_s``, the speed below which
+        traction rather than power limits acceleration, and the fastest decay
+        rate of the speed equation (-d(acceleration)/dv, 1/s); and both cars'
         speeds at the last step before the braking point in the two figure
         scenarios.
     """
@@ -524,6 +608,7 @@ def speed_trace(distances_m=(400, 800, 1300), duration_s=120.0):
             "speed_kph_at_m": {str(d): float(np.interp(d, run["x"], run["kph"])) for d in distances_m},
             "peak_speed_kph": float(run["kph"].max()),
             "speed_kph_after_duration": float(run["kph"].iloc[-1]),
+            **_speed_dynamics(share, overtake_mode),
         }
     default = complete({}).iloc[0].to_dict()
     traces = {"Default scenario": simulator.speed_trace(default),
@@ -533,6 +618,51 @@ def speed_trace(distances_m=(400, 800, 1300), duration_s=120.0):
                              for title, tr in traces.items()}
     plots.speed_trace(traces, FIGURES / "speed_trace.png")
     return _write("speed_trace", out)
+
+
+def _speed_dynamics(share, overtake_mode, car=simulator.CAR):
+    """Where traction limits one car on new softs in the dry, and how fast its speed equation decays.
+
+    Parameters
+    ----------
+    share : float
+        MGU-K deployment share (1 Boost, 0.55 standard map, 0 none).
+    overtake_mode : bool
+        Whether the Overtake Mode taper applies.
+    car : CarParameters, optional
+
+    Returns
+    -------
+    dict
+        ``traction_limited_below_kph``: speed where the power-limited and
+        traction-limited drive forces are equal; ``max_speed_decay_rate_per_s``:
+        the largest -d(acceleration)/dv between 150 and 350 km/h with energy
+        available, the stiffness of the speed equation that `stability`
+        compares with the battery ramp.
+    """
+    from scipy.optimize import brentq
+
+    state = CarState(mu=np.array([car.mu_reference]), cda_m2=np.array([car.cda_m2]),
+                     deploy_share=np.array([share]), energy_j=np.array([1e9]),
+                     overtake_mode=np.array([overtake_mode]))
+
+    def power_minus_traction(v):
+        """Power-limited minus traction-limited drive force at speed ``v`` (m/s), N."""
+        p_k = share * physics.mguk_power_limit(np.array([v]), np.array([overtake_mode]), car)[0]
+        f_power = car.drivetrain_efficiency * (car.ice_power_w + p_k) / v
+        f_traction = car.mu_reference * car.driven_axle_share * (
+            car.mass_kg * physics.GRAVITY + 0.5 * car.air_density * car.cla_m2 * v**2)
+        return f_power - f_traction
+
+    def accel(v):
+        """Acceleration (m/s^2) at speed ``v`` with no energy used yet."""
+        return acceleration(np.array([v]), np.array([0.0]), state, state.cda_m2, car)[0][0]
+
+    speeds = np.linspace(150, 350, 401) / 3.6
+    h = 1e-3  # m/s; central difference of the acceleration
+    rates = [-(accel(v + h) - accel(v - h)) / (2 * h) for v in speeds]
+    return {"traction_limited_below_kph": 3.6 * brentq(power_minus_traction, 10.0, 90.0),
+            "max_speed_decay_rate_per_s": float(max(rates))}
 
 
 # Estimated (not regulated) constants varied by `constants`: label, where it lives, name.
@@ -582,6 +712,7 @@ def constants(change=0.1, n=2000):
     base = simulator.probability(scenarios)
 
     def scaled(value, factor):
+        """``value`` times ``factor``; for a table (dict) every entry is scaled."""
         # EXECUTION_SD is a table by track condition; scale every entry.
         return {k: v * factor for k, v in value.items()} if isinstance(value, dict) else value * factor
 
@@ -655,6 +786,7 @@ ARCHITECTURES = [(32,), (64, 64), (128, 128, 64), (256, 256, 128)]
 
 
 def _inference_seconds(predictor, df, repeats=3):
+    """Best wall-clock seconds for every ensemble member's forward pass on ``df`` (preprocessing excluded)."""
     cat, num = predictor.preprocessor.transform(df)
     with torch.no_grad():
         seconds, _ = _timed(lambda: [m(cat, num) for m in predictor.models], repeats)
@@ -747,6 +879,7 @@ def ablation(seeds=(0, 1, 2, 3, 4)):
     default_truth = float(simulator.probability(pd.DataFrame([DEFAULTS]))[0])
 
     def evaluate(p_val, p_default, p_axis):
+        """Validation metrics, default-scenario error and worst battery-axis error for one set of predictions."""
         m = metrics(y, p_val, p_true)
         return {"val_log_loss": m["log_loss"], "val_mae_vs_true": m["mae_vs_true"],
                 "default_scenario_error": float(p_default - default_truth),
@@ -799,6 +932,7 @@ def tune_baselines(learning_rates=(0.05, 0.1, 0.2), leaves=(15, 31, 63), cs=(0.1
     y, p_true = val_df[LABEL].to_numpy(), val_df["p_true"].to_numpy()
 
     def score(model):
+        """Fit time and validation log loss and error against the exact probability of a fitted baseline."""
         m = metrics(y, model.predict(val_df), p_true)
         return {"fit_seconds": model.fit_seconds, "val_log_loss": m["log_loss"], "val_mae_vs_true": m["mae_vs_true"]}
 
@@ -846,6 +980,7 @@ def tyre_mismatch(df):
 
 
 def _region_errors(test_df, p):
+    """Mean absolute error against ``p_true`` per weather, per segment and with or without suited tyres."""
     err = np.abs(p - test_df["p_true"].to_numpy())
     regions = {}
     for column in ("track_condition", "segment"):
@@ -859,11 +994,13 @@ def _region_errors(test_df, p):
 
 
 def _error_quantiles(test_df, p):
+    """Quantiles (median to maximum) of the absolute error against ``p_true``, keyed ``q50`` ... ``q100``."""
     err = np.abs(p - test_df["p_true"].to_numpy())
     return {f"q{int(q * 1000) / 10:g}": float(np.quantile(err, q)) for q in (0.5, 0.9, 0.99, 0.999, 1.0)}
 
 
 def _model_bytes(obj):
+    """Memory of a model: float bytes of the network weights, or the pickled size of a scikit-learn pipeline."""
     if isinstance(obj, OvertakePredictor):
         return sum(p.numel() * p.element_size() for m in obj.models for p in m.parameters())
     return len(pickle.dumps(obj.pipeline))
@@ -987,7 +1124,7 @@ def performance():
     top = sorted(stats.stats.items(), key=lambda kv: kv[1][2], reverse=True)[:8]
     total = sum(v[2] for v in stats.stats.values())
     out["profile_top_functions"] = [
-        {"function": f"{fn[0].split('/')[-1]}:{fn[2]}", "calls": v[1], "own_seconds": v[2],
+        {"function": f"{fn[0].replace(chr(92), '/').split('/')[-1]}:{fn[2]}", "calls": v[1], "own_seconds": v[2],
          "share": v[2] / total} for fn, v in top
     ]
     # Cumulative time includes everything a function calls, so the stages show where
@@ -1062,11 +1199,16 @@ def performance():
     }
     t_data, _ = _timed(lambda: simulator.generate_dataset(300_000, seed=SEED), repeats=1)
     checkpoint = torch.load(DEFAULT_MODEL, map_location="cpu", weights_only=True)
+    # One epoch of one network, timed here, so data generation and training compare on one machine.
+    train_df, val_df, _ = split(dataset(), SEED)
+    t_epoch, _ = _timed(lambda: train_network(train_df, val_df, epochs=1, seed=SEED, log=lambda _: None),
+                        repeats=1)
     out["training_pipeline"] = {"data_generation_seconds_300k": t_data,
+                                "one_epoch_one_network_seconds": t_epoch,
                                 "ensemble_training_seconds": checkpoint["fit_seconds"],
                                 "first_network_epochs": len(checkpoint["history"]),
-                                "note": "training time was measured when the model was trained (python -m "
-                                        "overtake.train); data generation is timed here"}
+                                "note": "ensemble_training_seconds was measured when the model was trained "
+                                        "(python -m overtake.train, another machine); the rest is timed here"}
     return _write("performance", out)
 
 
@@ -1116,6 +1258,13 @@ def sensitivity():
                   exact=lambda s: simulator.probability(pd.DataFrame(s)))
     base = {"network": network.predict(DEFAULTS), "exact": float(simulator.probability(pd.DataFrame([DEFAULTS]))[0])}
 
+    # Along the attacker-battery axis through the default scenario: where is the network furthest off?
+    dry = pd.DataFrame([{**DEFAULTS, "attacker_battery": b} for b in np.arange(30.0, 101.0, 2.5)])
+    dry_err = network.predict(dry) - simulator.probability(dry)
+    worst = int(np.argmax(np.abs(dry_err)))
+    dry_axis = {"worst_error": float(dry_err[worst]), "worst_at_battery": float(dry["attacker_battery"][worst]),
+                "error_at_full_battery": float(dry_err[-1])}
+
     # The bias near a full attacker battery, repeated on a wet track with intermediates.
     wet = {**DEFAULTS, "track_condition": "wet", "attacker_tyre": "intermediate",
            "defender_tyre": "intermediate", "track_temp_c": 20.0}
@@ -1129,6 +1278,7 @@ def sensitivity():
     wet_test = {"scenarios": int(mask.sum()), "mean_signed_error": float(err.mean()),
                 "mean_abs_error": float(np.abs(err).mean())}
     return _write("sensitivity", {"default_scenario": base, "rows": rows,
+                                  "default_battery_axis": dry_axis,
                                   "wet_intermediates_battery_axis": wet_axis,
                                   "test_wet_straights_treaded_tyres": wet_test})
 
@@ -1174,6 +1324,7 @@ def figures():
         ``redrawn`` and ``skipped`` figure file names.
     """
     def load(name):
+        """The saved ``reports/results/<name>.json`` as a dict, or None if that experiment has not been run."""
         path = RESULTS / f"{name}.json"
         return json.loads(path.read_text()) if path.exists() else None
 

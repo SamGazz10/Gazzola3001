@@ -5,6 +5,7 @@ from overtake.export import ATTEMPT_COLUMNS, write_workbook
 
 
 def test_workbook_has_every_sheet_and_attempt(tmp_path):
+    """A small workbook has the expected sheets, one row per attempt, all three splits and valid probabilities."""
     path = write_workbook(tmp_path / "small.xlsx", n=400, log=lambda _: None)
     wb = load_workbook(path, read_only=True)
     assert wb.sheetnames[:6] == ["About", "Summary", "Metrics", "Inputs", "Model parameters", "Attempts"]
