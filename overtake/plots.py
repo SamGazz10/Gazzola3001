@@ -28,7 +28,7 @@ plt.rcParams.update({
     "axes.edgecolor": AXIS,
     "axes.labelcolor": INK_SECONDARY,
     "axes.titlecolor": INK,
-    "axes.titlesize": 11,
+    "axes.titlesize": 13,
     "axes.titleweight": "bold",
     "axes.titlelocation": "left",
     "axes.grid": True,
@@ -41,7 +41,7 @@ plt.rcParams.update({
     "text.color": INK,
     "legend.frameon": False,
     "legend.labelcolor": INK_SECONDARY,
-    "font.size": 9,
+    "font.size": 12,
     "lines.linewidth": 2,
 })
 
@@ -83,7 +83,7 @@ def _label_points(ax, xs, ys, labels, marker_pt=4):
 
     def place(i, offset, ha, va):
         text = ax.annotate(labels[i], (xs[i], ys[i]), xytext=offset, textcoords="offset points", ha=ha, va=va,
-                           color=INK_SECONDARY, fontsize=8)
+                           color=INK_SECONDARY, fontsize=10)
         return text, text.get_window_extent(renderer).padded(1)
 
     for i in sorted(range(len(labels)), key=lambda i: -near[i]):
@@ -241,7 +241,8 @@ def timestep(results, path, chosen_dt):
     Parameters
     ----------
     results : dict
-        ``{"dt": [...], method: {"max_error_s": [...], "seconds": [...]}}``.
+        ``{"dt": [...], method: {"max_error_s": [...], "seconds": [...]}}``,
+        optionally with ``rk4_linear_crossing`` (drawn dashed, accuracy only).
     path : str or pathlib.Path
     chosen_dt : float
         Step used by the simulator, highlighted.
@@ -252,6 +253,9 @@ def timestep(results, path, chosen_dt):
         err, sec = np.array(results[method]["max_error_s"]), np.array(results[method]["seconds"])
         left.loglog(dt, err, color=color, label=label, **MARKER)
         right.loglog(sec, err, color=color, label=label, **MARKER)
+    if "rk4_linear_crossing" in results:
+        left.loglog(dt, results["rk4_linear_crossing"]["max_error_s"], color=SERIES[0], linewidth=1,
+                    linestyle="--", label="RK4, linear crossing")
     i = list(dt).index(chosen_dt)
     for ax, x in ((left, chosen_dt), (right, results["rk4"]["seconds"][i])):
         ax.plot([x], [results["rk4"]["max_error_s"][i]], marker="o", markersize=10, color=SERIES[0],
@@ -290,11 +294,11 @@ def stability(results, path):
             limit = row["predicted_dt_limit_s"][method]
             ax.axvline(limit, color=color, linewidth=1, linestyle="--")
             ax.annotate(f"{label} limit\n{limit:.2f} s", (limit, 1.0), xycoords=ax.get_xaxis_transform(),
-                        xytext=(3, -3), textcoords="offset points", va="top", color=color, fontsize=8)
+                        xytext=(3, -3), textcoords="offset points", va="top", color=color, fontsize=10)
         ax.axvline(results["chosen_dt"], color=AXIS, linewidth=1)
         ax.annotate(f"chosen\n{results['chosen_dt']} s", (results["chosen_dt"], 0.35),
                     xycoords=ax.get_xaxis_transform(), xytext=(4, 0), textcoords="offset points",
-                    ha="left", color=MUTED, fontsize=8)
+                    ha="left", color=MUTED, fontsize=10)
         ax.set_title(f"{title}: decay rate {row['decay_rate_per_s']:.1f} 1/s")
         ax.set_xlabel("Time step (s)")
     # One legend, in the empty space between the chosen step and the limits.
@@ -423,9 +427,9 @@ def sensitivity(rows, path):
         ends = sorted([(lo, row["exact"][0], row["low"]), (hi, row["exact"][1], row["high"])])
         (l_net, l_true, l_text), (r_net, r_true, r_text) = ends
         ax.annotate(l_text, (min(l_net, l_true), i), xytext=(-7, 0), textcoords="offset points", ha="right",
-                    va="center", color=MUTED, fontsize=8)
+                    va="center", color=MUTED, fontsize=10)
         ax.annotate(r_text, (max(r_net, r_true), i), xytext=(7, 0), textcoords="offset points", ha="left",
-                    va="center", color=MUTED, fontsize=8)
+                    va="center", color=MUTED, fontsize=10)
     ax.set_yticks(range(len(rows)), [READABLE.get(r["input"], r["input"]) for r in reversed(rows)])
     _percent_axis(ax, "x")
     ax.set_xlim(-0.12, 1.12)
@@ -433,6 +437,65 @@ def sensitivity(rows, path):
     ax.set_title("Sensitivity around the default scenario")
     ax.legend(loc="lower right")
     ax.grid(axis="y", visible=False)
+    _save(fig, path)
+
+
+def constants(results, path):
+    """Change in the exact probability when each estimated constant moves by 10 %.
+
+    Parameters
+    ----------
+    results : dict
+        `overtake.experiments.constants` output: ``change`` and ``rows``,
+        each with ``constant`` and ``mean_abs_change`` (low, high), sorted by
+        importance.
+    path : str or pathlib.Path
+    """
+    rows = results["rows"]
+    pct = round(100 * results["change"])
+    fig, ax = plt.subplots(figsize=(8, 0.36 * len(rows) + 1.3))
+    y = np.arange(len(rows))[::-1]
+    low = np.array([r["mean_abs_change"][0] for r in rows]) * 100
+    high = np.array([r["mean_abs_change"][1] for r in rows]) * 100
+    ax.barh(y + 0.19, low, height=0.36, color=SERIES[0], label=f"{pct} % lower")
+    ax.barh(y - 0.19, high, height=0.36, color=SERIES[1], label=f"{pct} % higher")
+    ax.set_yticks(y, [r["constant"] for r in rows])
+    ax.set_xlabel("Mean change in P(overtake), percentage points")
+    ax.set_title(f"Effect of each estimated constant changed by {pct} %")
+    ax.legend(loc="lower right")
+    ax.grid(axis="y", visible=False)
+    _save(fig, path)
+
+
+def rules(results, path):
+    """Exact probability against the Overtake Mode energy and taper start, by attacker charge.
+
+    Parameters
+    ----------
+    results : dict
+        `overtake.experiments.rules` output.
+    path : str or pathlib.Path
+    """
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.8), sharey=True)
+    ramp = BATTERY_RAMP[-len(results["batteries"]):]
+    for battery, color in zip(results["batteries"], ramp):
+        left.plot(results["energy"]["mj"], results["energy"]["p"][str(battery)], color=color,
+                  label=f"{battery}% battery", **MARKER)
+        right.plot(results["taper"]["start_kph"], results["taper"]["p"][str(battery)], color=color,
+                   label=f"{battery}% battery", **MARKER)
+    rule = results["rule_2026"]
+    for ax, x, text in ((left, rule["energy_mj"], f"2026: {rule['energy_mj']:g} MJ"),
+                        (right, rule["taper_start_kph"], f"2026: {rule['taper_start_kph']:g} km/h")):
+        ax.axvline(x, color=AXIS, linewidth=1)
+        ax.annotate(text, (x, 0.97), xycoords=ax.get_xaxis_transform(), xytext=(4, 0),
+                    textcoords="offset points", va="top", color=MUTED)
+    left.set_xlabel("Overtake Mode extra energy (MJ)")
+    left.set_ylabel("P(overtake), default scenario")
+    left.set_title("Extra energy (taper start 337 km/h)")
+    left.legend(loc="center right")
+    right.set_xlabel("Speed where electrical power starts to taper (km/h)")
+    right.set_title("Taper start (extra energy 0.5 MJ)")
+    _percent_axis(left)
     _save(fig, path)
 
 
@@ -515,7 +578,7 @@ def real_gap(result, path):
               label="Simulator (per attempt)", **MARKER)
     left.axvline(1.0, color=AXIS, linewidth=1)
     left.annotate("Overtake Mode limit", (1.0, 0.5), xycoords=left.get_xaxis_transform(), xytext=(4, 0),
-                  textcoords="offset points", rotation=90, va="center", color=MUTED, fontsize=8)
+                  textcoords="offset points", rotation=90, va="center", color=MUTED, fontsize=10)
     left.set_xlabel("Gap to the car ahead (s)")
     left.set_ylabel("Pass rate relative to 0.25-0.5 s")
     left.set_title("Shape: how fast the chance falls with gap")
@@ -581,7 +644,7 @@ def real_speed_traps(rows, path):
                           (355, 1.5, "355 km/h: electric\npower reaches zero")):
         ax.axvline(x, color=AXIS, linewidth=1)
         ax.annotate(label, (x, row), xytext=(-4, 0), textcoords="offset points", ha="right", va="center",
-                    color=MUTED, fontsize=8)
+                    color=MUTED, fontsize=10)
     ax.set_yticks(y, [r["race"] for r in rows])
     ax.set_xlabel("Highest speed per lap from the timing points (km/h)")
     ax.set_title("Speed traps, every 2026 race lap")
@@ -600,7 +663,7 @@ def workflow_diagram(path):
     ----------
     path : str or pathlib.Path
     """
-    # Sized for a full text width of an A4 page, so the text prints at about 7-8 pt.
+    # Sized for the full text width of an A4 page (about 6.9 in), so the text prints at about 7-8.5 pt.
     fig, ax = plt.subplots(figsize=(7.2, 2.75))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 3.6)
@@ -611,8 +674,8 @@ def workflow_diagram(path):
         """Draw a rounded box with a bold title and a smaller description; return its extent."""
         ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
                                     facecolor=tint[kind], edgecolor=AXIS, linewidth=0.8))
-        ax.text(x + w / 2, y + h - 0.12, title, ha="center", va="top", fontsize=8, fontweight="bold", color=INK)
-        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=6.6, color=INK_SECONDARY,
+        ax.text(x + w / 2, y + h - 0.12, title, ha="center", va="top", fontsize=9, fontweight="bold", color=INK)
+        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=7.6, color=INK_SECONDARY,
                 linespacing=1.3)
         return (x, y, w, h)
 
@@ -622,7 +685,7 @@ def workflow_diagram(path):
         ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=10,
                                      color=INK_SECONDARY, linewidth=0.9))
         if label:
-            ax.text((x0 + x1) / 2, (y0 + y1) / 2 + 0.08 + dy, label, ha="center", va="bottom", fontsize=7,
+            ax.text((x0 + x1) / 2, (y0 + y1) / 2 + 0.08 + dy, label, ha="center", va="bottom", fontsize=7.8,
                     color=INK_SECONDARY)
 
     # Top row: the simulator and the network; bottom row: what checks each part.

@@ -62,21 +62,49 @@ class SklearnModel:
         return self.pipeline.predict_proba(_inputs(scenarios))[:, 1]
 
 
-def logistic_regression():
-    """Unfitted logistic regression on one-hot categoricals and standardised numerics."""
+def logistic_regression(C=1.0):
+    """Unfitted logistic regression on one-hot categoricals and standardised numerics.
+
+    Parameters
+    ----------
+    C : float, optional
+        Inverse strength of the L2 penalty (scikit-learn's default, 1, is used
+        in the comparison; `overtake.experiments.tune_baselines` tries others).
+
+    Returns
+    -------
+    SklearnModel
+    """
     columns = ColumnTransformer([
         ("categorical", OneHotEncoder(handle_unknown="ignore"), list(CATEGORICAL)),
         ("numeric", StandardScaler(), NUMERIC),
         ("binary", "passthrough", BINARY),
     ])
-    return SklearnModel("Logistic regression", make_pipeline(columns, LogisticRegression(max_iter=2000)))
+    return SklearnModel("Logistic regression", make_pipeline(columns, LogisticRegression(C=C, max_iter=2000)))
 
 
-def gradient_boosting(seed=0):
+def gradient_boosting(seed=0, learning_rate=0.1, max_leaf_nodes=31, max_iter=500):
     """Unfitted histogram gradient-boosted trees with native categorical splits.
 
-    Settings: 500 trees maximum with early stopping on a 10 % internal
-    validation split, learning rate 0.1, 31 leaves per tree.
+    The defaults are the settings used in the comparison: at most 500 trees
+    with early stopping on a 10 % internal validation split, learning rate
+    0.1, 31 leaves per tree (`overtake.experiments.tune_baselines` tries
+    others).
+
+    Parameters
+    ----------
+    seed : int, optional
+        Seeds the internal validation split.
+    learning_rate : float, optional
+        Shrinkage applied to each tree's contribution.
+    max_leaf_nodes : int, optional
+        Maximum leaves per tree.
+    max_iter : int, optional
+        Maximum number of trees.
+
+    Returns
+    -------
+    SklearnModel
     """
     columns = ColumnTransformer([
         ("categorical", OrdinalEncoder(categories=[VOCABS[v] for v in CATEGORICAL.values()]), list(CATEGORICAL)),
@@ -84,7 +112,7 @@ def gradient_boosting(seed=0):
     ])
     n_cat = len(CATEGORICAL)
     model = HistGradientBoostingClassifier(
-        max_iter=500, learning_rate=0.1, max_leaf_nodes=31, early_stopping=True,
+        max_iter=max_iter, learning_rate=learning_rate, max_leaf_nodes=max_leaf_nodes, early_stopping=True,
         validation_fraction=0.1, categorical_features=np.arange(n_cat), random_state=seed,
     )
     return SklearnModel("Gradient boosting", make_pipeline(columns, model))

@@ -98,3 +98,43 @@ def test_braking_point_result_converges_with_timestep():
     _, coarse = run(dt=0.05)
     _, fine = run(dt=0.005)
     assert np.max(np.abs(coarse.deficit_s - fine.deficit_s)) < 1e-3
+
+
+def test_braking_point_time_matches_analytical_solution():
+    """The production path (integration plus Hermite crossing) against the constant-power exact solution."""
+    length = np.array([300.0, 800.0])
+    state = CarState(mu=np.full(2, 1e9), cda_m2=np.zeros(2), deploy_share=np.zeros(2), energy_j=np.zeros(2))
+    result = run_to_braking_point(length, np.full(2, 0.5), np.full(2, V0), np.full(2, V0), state, state,
+                                  car=POWER_ONLY)
+    # x = m / (3P) (v^3 - v0^3) gives the speed at the braking point, then v^2 = v0^2 + 2 P t / m the time.
+    v_end = (3 * P * length / M + V0**3) ** (1 / 3)
+    assert result.defender_speed == pytest.approx(v_end, rel=1e-8)
+    assert result.time_s == pytest.approx(M * (v_end**2 - V0**2) / (2 * P), rel=1e-8)
+
+
+def test_hermite_crossing_beats_linear_interpolation():
+    """Linear interpolation at the braking point is second order; Hermite matches RK4's fourth order."""
+    args, fine = run(dt=0.001)
+    errors = {crossing: np.abs(run_to_braking_point(*args, dt=0.05, crossing=crossing).deficit_s
+                               - fine.deficit_s).max() for crossing in ("hermite", "linear")}
+    assert errors["hermite"] < errors["linear"]
+
+
+def test_unknown_crossing_method_is_rejected():
+    """A misspelt interpolation option raises instead of silently using a default."""
+    args, _ = run(n=2)
+    with pytest.raises(ValueError, match="crossing"):
+        run_to_braking_point(*args, crossing="cubic")
+
+
+def test_newton_crossing_converges():
+    """Four Newton iterations from the linear guess solve the Hermite crossing to far below a millimetre."""
+    from overtake.physics import _crossing_fraction, _hermite
+    rng = np.random.default_rng(1)
+    n, dt = 1000, 0.05
+    x0, v0 = rng.uniform(0, 1000, n), rng.uniform(30, 95, n)
+    v1 = v0 + rng.uniform(-1, 1, n)       # a car's speed changes by at most about 1 m/s in one step
+    x1 = x0 + dt * (v0 + v1) / 2
+    target = x0 + rng.uniform(0, 1, n) * (x1 - x0)
+    s = _crossing_fraction(x0, v0, x1, v1, target, dt)
+    assert np.abs(_hermite(x0, v0, x1, v1, s, dt) - target).max() < 1e-9

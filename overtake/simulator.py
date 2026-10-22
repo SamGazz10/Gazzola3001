@@ -36,7 +36,7 @@ import pandas as pd
 from scipy.special import expit, ndtr
 
 from .features import (CIRCUITS, COMPOUNDS, CONDITIONS, LABEL, SEGMENTS, TRAINED_RUN_LENGTH_M,
-                       TRAINED_TRACK_TEMP_C)
+                       TRAINED_TRACK_TEMP_C, validate)
 from .physics import (BATTERY_USABLE_J, OVERTAKE_MODE_EXTRA_J, CarParameters, CarState, rk4_step,
                       run_to_braking_point, two_car_rhs)
 
@@ -166,7 +166,7 @@ def initial_conditions(df, car=CAR):
             "length": df["run_length_m"].to_numpy(dtype=float), "grip_a": grip_a, "grip_d": grip_d}
 
 
-def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
+def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR, crossing="hermite"):
     """Stage 1: integrate both cars along the run for every scenario.
 
     Parameters
@@ -177,6 +177,9 @@ def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
         Integration time step, s.
     method : {"rk4", "euler"}, optional
     car : CarParameters, optional
+    crossing : {"hermite", "linear"}, optional
+        Interpolation used to locate the braking point within the last step
+        (see `overtake.physics.run_to_braking_point`).
 
     Returns
     -------
@@ -187,7 +190,7 @@ def closing_run(df, dt=TIME_STEP_S, method="rk4", car=CAR):
     """
     ic = initial_conditions(df, car)
     run = run_to_braking_point(ic["length"], ic["gap"], ic["v0_a"], ic["v0_d"], ic["attacker"], ic["defender"],
-                               car, dt=dt, method=method)
+                               car, dt=dt, method=method, crossing=crossing)
     return run, ic["grip_a"], ic["grip_d"]
 
 
@@ -208,8 +211,15 @@ def speed_trace(scenario, dt=TIME_STEP_S, car=CAR):
         exit), ``attacker_kph``, ``defender_kph`` and ``attacker_mj``,
         ``defender_mj`` (electrical energy used), one row per step until the
         defender reaches the braking point.
+
+    Raises
+    ------
+    ValueError
+        If the scenario does not match the schema (`overtake.features.validate`).
     """
-    ic = initial_conditions(pd.DataFrame([scenario]), car)
+    df = pd.DataFrame([scenario])
+    validate(df)
+    ic = initial_conditions(df, car)
     y = np.array([[-ic["gap"][0] * ic["v0_d"][0]], [ic["v0_a"][0]], [0.0], [0.0], [ic["v0_d"][0]], [0.0]])
     rows, t = [], 0.0
     while y[3, 0] < ic["length"][0]:
@@ -314,7 +324,7 @@ def overtake_integral(deficit, sigma, z0, rule="gauss", n=16):
     return body + tail[..., 0]
 
 
-def probability(df, dt=TIME_STEP_S):
+def probability(df, dt=TIME_STEP_S, car=CAR):
     """Exact probability of an overtake for each scenario (physics + quadrature).
 
     Parameters
@@ -323,12 +333,22 @@ def probability(df, dt=TIME_STEP_S):
         Scenarios in the `overtake.features` schema.
     dt : float, optional
         ODE time step, s.
+    car : CarParameters, optional
+        Physical parameters of both cars (varied by
+        ``overtake.experiments.constants``).
 
     Returns
     -------
     numpy.ndarray
+
+    Raises
+    ------
+    ValueError
+        If ``df`` does not match the schema (`overtake.features.validate`):
+        without this check an unknown category would give NaN silently.
     """
-    run, grip_a, grip_d = closing_run(df, dt=dt)
+    validate(df)
+    run, grip_a, grip_d = closing_run(df, dt=dt, car=car)
     return overtake_integral(*outcome_parameters(df, run, grip_a, grip_d))
 
 

@@ -60,3 +60,9 @@ def test_dataset_labels_match_true_probability_on_average():
     assert set(df["overtake"].unique()) <= {0, 1}
     assert df["overtake"].mean() == pytest.approx(df["p_true"].mean(), abs=0.01)
     assert df["p_true"].between(0, 1).all()
+
+
+def test_probability_rejects_an_unknown_category():
+    """Without validation an unknown circuit would map to NaN and give P = NaN silently."""
+    with pytest.raises(ValueError, match="circuit"):
+        sim.probability(pd.DataFrame([{**DEFAULTS, "circuit": "imola"}]))

@@ -349,7 +349,7 @@ class RunResult:
 
 
 def run_to_braking_point(run_length_m, gap_s, attacker_speed0, defender_speed0, attacker, defender,
-                         car=CarParameters(), dt=0.05, method="rk4", max_time_s=60.0):
+                         car=CarParameters(), dt=0.05, method="rk4", max_time_s=60.0, crossing="hermite"):
     """Integrate both cars from the corner exit until the defender reaches the braking point.
 
     All scenarios are integrated together as NumPy arrays. Scenarios drop out
@@ -374,6 +374,11 @@ def run_to_braking_point(run_length_m, gap_s, attacker_speed0, defender_speed0, 
     max_time_s : float, optional
         Safety limit; a RuntimeError is raised if a car has not reached the
         braking point by then (e.g. a non-physical input left it stationary).
+    crossing : {"hermite", "linear"}, optional
+        How the state at the braking point is found within the last step:
+        cubic Hermite interpolation with a Newton solve (fourth order, the
+        default) or straight-line interpolation (second order; kept only so
+        that ``overtake.experiments.timestep`` can measure the difference).
 
     Returns
     -------
@@ -383,7 +388,11 @@ def run_to_braking_point(run_length_m, gap_s, attacker_speed0, defender_speed0, 
     ------
     RuntimeError
         If integration exceeds ``max_time_s``.
+    ValueError
+        If ``crossing`` is not "hermite" or "linear".
     """
+    if crossing not in ("hermite", "linear"):
+        raise ValueError(f"crossing must be 'hermite' or 'linear', not {crossing!r}")
     length = np.asarray(run_length_m, dtype=float)
     n = length.size
     y = np.stack([
@@ -410,14 +419,22 @@ def run_to_braking_point(run_length_m, gap_s, attacker_speed0, defender_speed0, 
         y_new = step(f, y, dt)
         crossed = y_new[3] >= target
         if crossed.any():
-            att_x, dfd_x = att.take(crossed), dfd.take(crossed)
-            d_old = two_car_rhs(y[:, crossed], att_x, dfd_x, car)
-            d_new = two_car_rhs(y_new[:, crossed], att_x, dfd_x, car)
-            s = _crossing_fraction(y[3, crossed], y[4, crossed], y_new[3, crossed], y_new[4, crossed],
-                                   target[crossed], dt)
             idx = active[crossed]
-            for row in range(6):
-                final[row, idx] = _hermite(y[row, crossed], d_old[row], y_new[row, crossed], d_new[row], s, dt)
+            if crossing == "linear":
+                # Straight line between the step's end points: second-order accurate.
+                s = np.clip((target[crossed] - y[3, crossed]) / np.maximum(y_new[3, crossed] - y[3, crossed], 1e-12),
+                            0.0, 1.0)
+                final[:, idx] = y[:, crossed] + s * (y_new[:, crossed] - y[:, crossed])
+            else:
+                # The derivatives at both ends of the step make the interpolant cubic and
+                # fourth-order accurate, matching RK4.
+                att_x, dfd_x = att.take(crossed), dfd.take(crossed)
+                d_old = two_car_rhs(y[:, crossed], att_x, dfd_x, car)
+                d_new = two_car_rhs(y_new[:, crossed], att_x, dfd_x, car)
+                s = _crossing_fraction(y[3, crossed], y[4, crossed], y_new[3, crossed], y_new[4, crossed],
+                                       target[crossed], dt)
+                for row in range(6):
+                    final[row, idx] = _hermite(y[row, crossed], d_old[row], y_new[row, crossed], d_new[row], s, dt)
             finish_time[idx] = t + s * dt
             keep = ~crossed
             active, y_new, target = active[keep], y_new[:, keep], target[keep]
