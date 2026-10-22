@@ -1,0 +1,126 @@
+{
+  "gradient_boosting": [
+    {
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 15,
+      "max_iter": 1000,
+      "trees": 865,
+      "fit_seconds": 19.089324000058696,
+      "val_log_loss": 0.26821809438858996,
+      "val_mae_vs_true": 0.037240485705730485
+    },
+    {
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 31,
+      "max_iter": 1000,
+      "trees": 497,
+      "fit_seconds": 15.37901699997019,
+      "val_log_loss": 0.2686087423274685,
+      "val_mae_vs_true": 0.03736227950138112
+    },
+    {
+      "learning_rate": 0.05,
+      "max_leaf_nodes": 63,
+      "max_iter": 1000,
+      "trees": 393,
+      "fit_seconds": 16.46957509999629,
+      "val_log_loss": 0.26770213021073336,
+      "val_mae_vs_true": 0.03726290728934182
+    },
+    {
+      "learning_rate": 0.1,
+      "max_leaf_nodes": 15,
+      "max_iter": 1000,
+      "trees": 376,
+      "fit_seconds": 9.638041699887253,
+      "val_log_loss": 0.2697147991137127,
+      "val_mae_vs_true": 0.039603156731223346
+    },
+    {
+      "learning_rate": 0.1,
+      "max_leaf_nodes": 31,
+      "max_iter": 1000,
+      "trees": 255,
+      "fit_seconds": 9.368979000020772,
+      "val_log_loss": 0.26723084397436764,
+      "val_mae_vs_true": 0.037069928923405264
+    },
+    {
+      "learning_rate": 0.1,
+      "max_leaf_nodes": 63,
+      "max_iter": 1000,
+      "trees": 177,
+      "fit_seconds": 8.828948499984108,
+      "val_log_loss": 0.2696799567022434,
+      "val_mae_vs_true": 0.03935543270284619
+    },
+    {
+      "learning_rate": 0.2,
+      "max_leaf_nodes": 15,
+      "max_iter": 1000,
+      "trees": 208,
+      "fit_seconds": 6.291405400028452,
+      "val_log_loss": 0.2695915780785131,
+      "val_mae_vs_true": 0.03862198633089589
+    },
+    {
+      "learning_rate": 0.2,
+      "max_leaf_nodes": 31,
+      "max_iter": 1000,
+      "trees": 141,
+      "fit_seconds": 5.952380800037645,
+      "val_log_loss": 0.2700803864310669,
+      "val_mae_vs_true": 0.04021398205585947
+    },
+    {
+      "learning_rate": 0.2,
+      "max_leaf_nodes": 63,
+      "max_iter": 1000,
+      "trees": 76,
+      "fit_seconds": 5.133903800044209,
+      "val_log_loss": 0.2721296435239706,
+      "val_mae_vs_true": 0.0422822247459914
+    }
+  ],
+  "logistic_regression": [
+    {
+      "C": 0.1,
+      "fit_seconds": 2.7975416999543086,
+      "val_log_loss": 0.41045656741168196,
+      "val_mae_vs_true": 0.15458475063109803
+    },
+    {
+      "C": 1.0,
+      "fit_seconds": 2.8132867000531405,
+      "val_log_loss": 0.4104480832096753,
+      "val_mae_vs_true": 0.15451698520149543
+    },
+    {
+      "C": 10.0,
+      "fit_seconds": 2.844133500009775,
+      "val_log_loss": 0.4104472634117483,
+      "val_mae_vs_true": 0.1545101059461319
+    }
+  ],
+  "used": {
+    "gradient_boosting": {
+      "learning_rate": 0.1,
+      "max_leaf_nodes": 31,
+      "max_iter": 500,
+      "trees": 255,
+      "fit_seconds": 8.676824700087309,
+      "val_log_loss": 0.26723084397436764,
+      "val_mae_vs_true": 0.037069928923405264
+    },
+    "logistic_regression": {
+      "C": 1.0,
+      "fit_seconds": 2.8696820999030024,
+      "val_log_loss": 0.4104480832096753,
+      "val_mae_vs_true": 0.15451698520149543
+    }
+  },
+  "network_validation": {
+    "val_log_loss": 0.258462518453598,
+    "val_mae_vs_true": 0.020218746216264905
+  }
+}

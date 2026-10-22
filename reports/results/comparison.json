@@ -1,30 +1,39 @@
 {
   "test_attempts": 30000,
+  "dataset_overtake_rate": 0.27433,
   "tyre_mismatch_share": 0.17576666666666665,
   "models": {
     "Neural network": {
       "log_loss": 0.25650453567504883,
       "brier": 0.08079996705055237,
-      "roc_auc": 0.9477470345807615,
+      "roc_auc": 0.9477470373703988,
       "accuracy": 0.8845,
       "calibration_error": 0.005157090305164451,
-      "mae_vs_true": 0.02025363844905794,
+      "mae_vs_true": 0.020253638394300045,
       "max_error_vs_true": 0.5865554497648635,
       "fit_seconds": 207.93907979800133,
-      "predict_us_per_scenario": 4.062439000063023,
-      "model_bytes": 131780
+      "predict_us_per_scenario": 12.377529998775572,
+      "model_bytes": 131780,
+      "mae_vs_true_ci95": [
+        0.019887019579387304,
+        0.020615835476987043
+      ]
     },
     "Logistic regression": {
       "log_loss": 0.41139865906644496,
       "brier": 0.13175627281871985,
       "roc_auc": 0.8526781702936833,
       "accuracy": 0.8122666666666667,
-      "calibration_error": 0.004220494004259819,
+      "calibration_error": 0.004220494004259841,
       "mae_vs_true": 0.15652144770540222,
       "max_error_vs_true": 0.9892984585964693,
-      "fit_seconds": 2.6222702039995056,
-      "predict_us_per_scenario": 3.6214974999893457,
-      "model_bytes": 4194
+      "fit_seconds": 3.2366003999486566,
+      "predict_us_per_scenario": 8.597420004662126,
+      "model_bytes": 4194,
+      "mae_vs_true_ci95": [
+        0.15468652078290787,
+        0.15847859574810225
+      ]
     },
     "Gradient boosting": {
       "log_loss": 0.2666765136711842,
@@ -34,65 +43,69 @@
       "calibration_error": 0.014133883617464989,
       "mae_vs_true": 0.03778750791369698,
       "max_error_vs_true": 0.6997072716227349,
-      "fit_seconds": 4.33785243300008,
-      "predict_us_per_scenario": 8.640011199986475,
-      "model_bytes": 1138666
+      "fit_seconds": 8.624880900024436,
+      "predict_us_per_scenario": 16.771309997420758,
+      "model_bytes": 1138666,
+      "mae_vs_true_ci95": [
+        0.037194341928504605,
+        0.038383627930413944
+      ]
     },
     "Direct simulation": {
       "mae_vs_true": 0.0,
-      "predict_us_per_scenario": 93.91836449995026,
-      "note": "the ground truth itself; needs the physical model, so cannot learn from observed race outcomes"
+      "predict_us_per_scenario": 245.8240900072269,
+      "note": "the ground truth itself; its few outcome constants could be fitted to aggregate race data, but it cannot learn from labelled individual attempts"
     }
   },
   "regions": {
     "Neural network": {
-      "dry": 0.01927606306234295,
-      "damp": 0.025174838420740628,
-      "wet": 0.020979962602075457,
-      "straight": 0.025078591357375543,
-      "slow_corner": 0.015314281823216697,
-      "medium_corner": 0.013798249546478078,
-      "fast_corner": 0.01314235585863377,
-      "tyres_suit_surface": 0.018948936967311026,
-      "tyre_mismatch": 0.026371851328556326
+      "dry": 0.019276062964347706,
+      "damp": 0.025174838331844477,
+      "wet": 0.02097996285855863,
+      "straight": 0.0250785912277511,
+      "slow_corner": 0.015314282018537849,
+      "medium_corner": 0.013798249241850658,
+      "fast_corner": 0.013142356082690518,
+      "tyres_suit_surface": 0.018948936939986456,
+      "tyre_mismatch": 0.026371851145153762
     },
     "Logistic regression": {
-      "dry": 0.14852702442519536,
-      "damp": 0.1660908725378782,
-      "wet": 0.19646431544537096,
-      "straight": 0.20046829054834198,
-      "slow_corner": 0.11019254438538541,
-      "medium_corner": 0.09951348671776515,
-      "fast_corner": 0.09179552419373223,
-      "tyres_suit_surface": 0.13125874690203987,
+      "dry": 0.14852702442519541,
+      "damp": 0.16609087253787808,
+      "wet": 0.19646431544537088,
+      "straight": 0.20046829054834203,
+      "slow_corner": 0.11019254438538534,
+      "medium_corner": 0.09951348671776511,
+      "fast_corner": 0.0917955241937323,
+      "tyres_suit_surface": 0.1312587469020399,
       "tyre_mismatch": 0.27498736895796067
     },
     "Gradient boosting": {
       "dry": 0.03568335606004935,
-      "damp": 0.04301200778090031,
+      "damp": 0.0430120077809003,
       "wet": 0.04530121812367853,
       "straight": 0.048397633711380866,
       "slow_corner": 0.02471640278155218,
       "medium_corner": 0.023745111451784578,
       "fast_corner": 0.026341042965953278,
-      "tyres_suit_surface": 0.033791095194230125,
+      "tyres_suit_surface": 0.03379109519423012,
       "tyre_mismatch": 0.05652812944114943
     }
   },
   "error_quantiles": {
     "Neural network": {
-      "q50": 0.007367278447104109,
+      "q50": 0.007367248644781721,
       "q90": 0.05557119042904411,
-      "q99": 0.1559690537768013,
-      "q99.9": 0.2991255993376547,
+      "q99": 0.1559690539258129,
+      "q99.9": 0.2991256588826949,
       "q100": 0.5865554497648635,
       "tyre_mismatch_share_of_worst_1pct": 0.49666666666666665,
       "tyre_mismatch_share_of_worst_0.1pct": 0.7
     },
     "Logistic regression": {
-      "q50": 0.09729712388602224,
-      "q90": 0.38664999724296756,
-      "q99": 0.7677363393615216,
+      "q50": 0.09729712388602213,
+      "q90": 0.3866499972429662,
+      "q99": 0.7677363393615231,
       "q99.9": 0.9512437543014841,
       "q100": 0.9892984585964693,
       "tyre_mismatch_share_of_worst_1pct": 0.9333333333333333,
@@ -108,9 +121,36 @@
       "tyre_mismatch_share_of_worst_0.1pct": 0.9
     }
   },
+  "exact_probability_reference": {
+    "log_loss": 0.25246536678529546,
+    "brier": 0.07952542464079389,
+    "roc_auc": 0.9493237291703019,
+    "accuracy": 0.8875,
+    "calibration_error": 0.003913596371371652
+  },
+  "paired_differences": {
+    "Attacker Boost switched": {
+      "scenarios": 5000,
+      "mean_abs_exact_change": 0.10036313004240184,
+      "mean_abs_error_of_change": {
+        "Neural network": 0.020522709513935807,
+        "Logistic regression": 0.09599132810477069,
+        "Gradient boosting": 0.03487222343998052
+      }
+    },
+    "Attacker battery 20 points lower": {
+      "scenarios": 5000,
+      "mean_abs_exact_change": 0.03962021347639918,
+      "mean_abs_error_of_change": {
+        "Neural network": 0.01320745588497106,
+        "Logistic regression": 0.05605514132128486,
+        "Gradient boosting": 0.018152990657293616
+      }
+    }
+  },
   "extrapolation_1300_2000m": {
-    "Neural network": 0.04379775531632513,
-    "Logistic regression": 0.2686008668485327,
+    "Neural network": 0.04379775575252837,
+    "Logistic regression": 0.26860086684853285,
     "Gradient boosting": 0.09662985397275543
   }
 }

@@ -1,0 +1,73 @@
+{
+  "exit_speed_kph": 118.8,
+  "distances_m": [
+    400,
+    800,
+    1300
+  ],
+  "duration_s": 120.0,
+  "deployments": {
+    "Boost and Overtake Mode": {
+      "deploy_share": 1.0,
+      "overtake_mode": true,
+      "speed_kph_at_m": {
+        "400": 315.407022267691,
+        "800": 344.8066226239484,
+        "1300": 345.36801119549995
+      },
+      "peak_speed_kph": 345.36984111862785,
+      "speed_kph_after_duration": 303.39221164832617,
+      "traction_limited_below_kph": 202.5318698588311,
+      "max_speed_decay_rate_per_s": 1.1323739198678684
+    },
+    "Boost": {
+      "deploy_share": 1.0,
+      "overtake_mode": false,
+      "speed_kph_at_m": {
+        "400": 311.37335304575055,
+        "800": 329.6142714279742,
+        "1300": 331.9479162019111
+      },
+      "peak_speed_kph": 332.1427882374274,
+      "speed_kph_after_duration": 303.3922117189451,
+      "traction_limited_below_kph": 202.5318698588325,
+      "max_speed_decay_rate_per_s": 0.5469475911441535
+    },
+    "Standard map": {
+      "deploy_share": 0.55,
+      "overtake_mode": false,
+      "speed_kph_at_m": {
+        "400": 293.90308325405147,
+        "800": 318.971229400055,
+        "1300": 323.98374790501873
+      },
+      "peak_speed_kph": 324.79335445324006,
+      "speed_kph_after_duration": 303.39221305482823,
+      "traction_limited_below_kph": 177.37993697903812,
+      "max_speed_decay_rate_per_s": 0.39007686712677625
+    },
+    "No electrical power": {
+      "deploy_share": 0.0,
+      "overtake_mode": false,
+      "speed_kph_at_m": {
+        "400": 260.30197397179023,
+        "800": 288.0717444052452,
+        "1300": 298.82307055713363
+      },
+      "peak_speed_kph": 303.39221155570004,
+      "speed_kph_after_duration": 303.39221155570004,
+      "traction_limited_below_kph": 138.95136801431028,
+      "max_speed_decay_rate_per_s": 0.33835000015614014
+    }
+  },
+  "end_of_run_kph": {
+    "Default scenario": {
+      "attacker": 347.9866970236996,
+      "defender": 329.5220497404564
+    },
+    "Defender with 30 % charge": {
+      "attacker": 345.4811780681077,
+      "defender": 299.96984605039313
+    }
+  }
+}
