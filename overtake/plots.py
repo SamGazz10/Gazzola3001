@@ -600,7 +600,8 @@ def workflow_diagram(path):
     ----------
     path : str or pathlib.Path
     """
-    fig, ax = plt.subplots(figsize=(10, 3.7))
+    # Sized for a full text width of an A4 page, so the text prints at about 7-8 pt.
+    fig, ax = plt.subplots(figsize=(7.2, 2.75))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 3.6)
     ax.axis("off")
@@ -610,9 +611,9 @@ def workflow_diagram(path):
         """Draw a rounded box with a bold title and a smaller description; return its extent."""
         ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
                                     facecolor=tint[kind], edgecolor=AXIS, linewidth=0.8))
-        ax.text(x + w / 2, y + h - 0.13, title, ha="center", va="top", fontsize=9, fontweight="bold", color=INK)
-        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=7.5, color=INK_SECONDARY,
-                linespacing=1.35)
+        ax.text(x + w / 2, y + h - 0.12, title, ha="center", va="top", fontsize=8, fontweight="bold", color=INK)
+        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=6.6, color=INK_SECONDARY,
+                linespacing=1.3)
         return (x, y, w, h)
 
     def arrow(a, b, label=None, dy=0.0):
@@ -625,11 +626,11 @@ def workflow_diagram(path):
                     color=INK_SECONDARY)
 
     # Top row: the simulator and the network; bottom row: what checks each part.
-    top, bottom, h = 2.15, 0.2, 1.3
+    top, bottom, h = 2.08, 0.12, 1.42
     scen = box(0.05, top, 1.65, h, "Scenario", "19 inputs: gap,\nbattery, Boost, tyres,\nweather, circuit", "sim")
-    ode = box(2.0, top, 2.0, h, "Two-car ODE, RK4", "power, traction, drag,\nslipstream, battery;\ndt = 0.05 s, Hermite\ncrossing at braking", "sim")
+    ode = box(2.0, top, 2.0, h, "Two-car ODE, RK4", "power, traction, drag,\nslipstream, battery;\ndt = 0.05 s, Hermite\nbraking-point crossing", "sim")
     outc = box(4.3, top, 1.75, h, "Outcome model", "time deficit D\n+ execution noise\n+ completion logit", "sim")
-    lab = box(6.35, top, 1.55, h, "0/1 labels", "one random\noutcome per\nattempt: the\ntraining data", "sim")
+    lab = box(6.35, top, 1.55, h, "0/1 labels", "one random\noutcome per\nattempt (the\ntraining data)", "sim")
     net = box(8.2, top, 1.75, h, "Neural network", "5 x MLP 64-64\nwith embeddings,\ntrained on 0/1 only", "nn")
     box(0.05, bottom, 1.65, h, "Real 2026 races", "OpenF1: speed\ntraps, telemetry,\npass rate vs gap", "val")
     verif = box(2.0, bottom, 2.0, h, "Verification", "analytical solutions,\nconvergence order,\nstability, constraints", "val")
