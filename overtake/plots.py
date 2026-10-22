@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 from .features import DEFAULTS
 
@@ -268,6 +269,37 @@ def timestep(results, path, chosen_dt):
     right.set_xlabel("Run time for the test scenarios (s)")
     right.set_title("Cost against accuracy")
     right.legend(loc="upper right")
+    _save(fig, path)
+
+
+def stability(results, path):
+    """Energy-budget overshoot against time step, Euler and RK4, with the predicted stability limits.
+
+    Parameters
+    ----------
+    results : dict
+        `overtake.experiments.stability` output.
+    path : str or pathlib.Path
+    """
+    deployments = results["deployments"]
+    fig, axes = plt.subplots(1, len(deployments), figsize=(10, 3.6), sharey=True)
+    dt = np.array(results["dt"])
+    for ax, (title, row) in zip(axes, deployments.items()):
+        for method, label, color in (("rk4", "RK4", SERIES[0]), ("euler", "Euler", SERIES[1])):
+            ax.plot(dt, np.array(row[method]["max_energy_overshoot_j"]) / 1e3, color=color, label=label, **MARKER)
+            limit = row["predicted_dt_limit_s"][method]
+            ax.axvline(limit, color=color, linewidth=1, linestyle="--")
+            ax.annotate(f"{label} limit\n{limit:.2f} s", (limit, 1.0), xycoords=ax.get_xaxis_transform(),
+                        xytext=(3, -3), textcoords="offset points", va="top", color=color, fontsize=8)
+        ax.axvline(results["chosen_dt"], color=AXIS, linewidth=1)
+        ax.annotate(f"chosen\n{results['chosen_dt']} s", (results["chosen_dt"], 0.35),
+                    xycoords=ax.get_xaxis_transform(), xytext=(4, 0), textcoords="offset points",
+                    ha="left", color=MUTED, fontsize=8)
+        ax.set_title(f"{title}: decay rate {row['decay_rate_per_s']:.1f} 1/s")
+        ax.set_xlabel("Time step (s)")
+    # One legend, in the empty space between the chosen step and the limits.
+    axes[-1].legend(loc="upper left", bbox_to_anchor=(0.2, 0.97))
+    axes[0].set_ylabel("Energy used beyond the battery (kJ)")
     _save(fig, path)
 
 
@@ -556,3 +588,69 @@ def real_speed_traps(rows, path):
     ax.legend(loc="upper left")
     ax.grid(axis="y", visible=False)
     _save(fig, path)
+
+
+def workflow_diagram(path):
+    """Boxes-and-arrows overview of the computational workflow (top row: the simulator and the network;
+    bottom row: what checks each part).
+
+    Colours: blue for the simulator, orange for the network, green for verification and validation.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+    """
+    fig, ax = plt.subplots(figsize=(10, 3.7))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 3.6)
+    ax.axis("off")
+    tint = {"sim": "#e6effa", "nn": "#fde9df", "val": "#e3f5ee"}
+
+    def box(x, y, w, h, title, body, kind):
+        """Draw a rounded box with a bold title and a smaller description; return its extent."""
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.02,rounding_size=0.08",
+                                    facecolor=tint[kind], edgecolor=AXIS, linewidth=0.8))
+        ax.text(x + w / 2, y + h - 0.13, title, ha="center", va="top", fontsize=9, fontweight="bold", color=INK)
+        ax.text(x + w / 2, y + h - 0.42, body, ha="center", va="top", fontsize=7.5, color=INK_SECONDARY,
+                linespacing=1.35)
+        return (x, y, w, h)
+
+    def arrow(a, b, label=None, dy=0.0):
+        """Draw an arrow from point ``a`` to point ``b``, optionally labelled at its midpoint."""
+        (x0, y0), (x1, y1) = a, b
+        ax.add_patch(FancyArrowPatch((x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=10,
+                                     color=INK_SECONDARY, linewidth=0.9))
+        if label:
+            ax.text((x0 + x1) / 2, (y0 + y1) / 2 + 0.08 + dy, label, ha="center", va="bottom", fontsize=7,
+                    color=INK_SECONDARY)
+
+    # Top row: the simulator and the network; bottom row: what checks each part.
+    top, bottom, h = 2.15, 0.2, 1.3
+    scen = box(0.05, top, 1.65, h, "Scenario", "19 inputs: gap,\nbattery, Boost, tyres,\nweather, circuit", "sim")
+    ode = box(2.0, top, 2.0, h, "Two-car ODE, RK4", "power, traction, drag,\nslipstream, battery;\ndt = 0.05 s, Hermite\ncrossing at braking", "sim")
+    outc = box(4.3, top, 1.75, h, "Outcome model", "time deficit D\n+ execution noise\n+ completion logit", "sim")
+    lab = box(6.35, top, 1.55, h, "0/1 labels", "one random\noutcome per\nattempt: the\ntraining data", "sim")
+    net = box(8.2, top, 1.75, h, "Neural network", "5 x MLP 64-64\nwith embeddings,\ntrained on 0/1 only", "nn")
+    box(0.05, bottom, 1.65, h, "Real 2026 races", "OpenF1: speed\ntraps, telemetry,\npass rate vs gap", "val")
+    verif = box(2.0, bottom, 2.0, h, "Verification", "analytical solutions,\nconvergence order,\nstability, constraints", "val")
+    exact = box(4.3, bottom, 1.75, h, "Exact P", "16-point\nGauss-Legendre\nquadrature", "sim")
+    valid = box(6.35, bottom, 1.55, h, "Validation", "network vs exact P\nand two baselines\non held-out data", "val")
+    pred = box(8.2, bottom, 1.75, h, "Prediction", "P(overtake)\nin about 1 µs\nper scenario", "nn")
+
+    def mid(b, side):
+        """Midpoint of the right, left, top or bottom edge of box ``b``."""
+        x, y, w, h = b
+        return {"r": (x + w, y + h / 2), "l": (x, y + h / 2), "t": (x + w / 2, y + h), "b": (x + w / 2, y)}[side]
+    arrow(mid(scen, "r"), mid(ode, "l"))
+    arrow(mid(ode, "r"), mid(outc, "l"))
+    arrow(mid(outc, "r"), mid(lab, "l"))
+    arrow(mid(lab, "r"), mid(net, "l"))
+    arrow(mid(outc, "b"), mid(exact, "t"))
+    arrow(mid(exact, "r"), mid(valid, "l"))
+    arrow(mid(net, "b"), mid(pred, "t"))
+    arrow((8.2, top), (7.9, bottom + h))           # network -> validation
+    arrow(mid(verif, "t"), mid(ode, "b"))           # verification checks the ODE solver
+    arrow((1.7, bottom + h), (2.0, top))            # real races check the physics
+    fig.savefig(path, dpi=200, facecolor=SURFACE, bbox_inches="tight")
+    plt.close(fig)
+

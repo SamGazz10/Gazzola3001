@@ -10,6 +10,7 @@ Each experiment writes ``reports/results/<name>.json`` and a figure in
 |---|---|
 | `solver` | Euler and RK4 against analytical solutions; observed order |
 | `timestep` | Error and cost of the full two-car model against time step |
+| `stability` | Explicit-solver stability on the stiffest part of the model (battery running out) |
 | `quadrature` | Quadrature rules and Monte Carlo against a reference |
 | `selection` | Network size and training-set size, on the validation set |
 | `ablation` | Physics-informed inputs and five-network ensembles, five seeds |
@@ -17,6 +18,7 @@ Each experiment writes ``reports/results/<name>.json`` and a figure in
 | `performance` | Profiling, vectorisation, chunk size, FLOPs and memory |
 | `sensitivity` | One-at-a-time sensitivity, network vs simulator truth |
 | `real` | Comparison with real 2026 races from OpenF1 (speeds, overtakes, gaps) |
+| `diagram` | The workflow overview figure |
 
 ``comparison`` and ``sensitivity`` use the trained network in ``models/``,
 so run ``python -m overtake.train`` first.
@@ -38,7 +40,7 @@ import torch
 from . import baselines, plots, simulator
 from .features import CATEGORICAL, DEFAULTS, LABEL, VOCABS
 from .model import OvertakeNet
-from .physics import CarParameters, CarState, acceleration, integrate
+from .physics import CarParameters, CarState, acceleration, euler_step, integrate, rk4_step
 from .predict import DEFAULT_MODEL, OvertakePredictor
 from .train import REPORTS, metrics, split, train_network
 
@@ -171,6 +173,100 @@ def timestep(n=2000, dts=(0.4, 0.2, 0.1, 0.05, 0.025, 0.0125), reference_dt=0.00
         out[method] = rows
     plots.timestep(out, FIGURES / "timestep_study.png", simulator.TIME_STEP_S)
     return _write("timestep", out)
+
+
+def rk4_amplification(z):
+    """RK4 amplification factor for the test equation ``y' = lambda y``.
+
+    One RK4 step multiplies the solution by ``R(z) = 1 + z + z^2/2 + z^3/6 + z^4/24``
+    with ``z = lambda dt``; the step is stable while ``|R(z)| <= 1``.
+
+    Parameters
+    ----------
+    z : float or numpy.ndarray
+
+    Returns
+    -------
+    float or numpy.ndarray
+    """
+    return 1 + z + z**2 / 2 + z**3 / 6 + z**4 / 24
+
+
+def stability(dts=(0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.2, 0.25, 0.3), battery_j=0.2e6, t_end=3.0,
+              reference_dt=0.001):
+    """Stability of Euler and RK4 on the stiffest part of the model: the battery running out.
+
+    In the last ``energy_smoothing_j`` (20 kJ) of a battery the MGU-K power is
+    ramped down in proportion to the energy left, so the energy used ``e``
+    obeys ``de/dt = s P (E - e) / S`` (deployment share ``s``, MGU-K limit
+    ``P``, energy available ``E``, ramp width ``S``). That is exponential
+    decay with rate ``lambda = s P / S``: 17.5 1/s with Boost, against about
+    0.25 1/s for the speed (drag and power). An explicit method is stable only
+    while ``lambda dt`` lies inside its stability region, which on the real
+    axis is 2 for Euler and about 2.785 for RK4, so this ramp, not the vehicle
+    dynamics, sets the largest usable time step.
+
+    The check: one car starts at 200 km/h with only ``battery_j`` of energy
+    (so the ramp is reached within a second) and is integrated for ``t_end``
+    seconds at each step. An unstable step shows as the energy used
+    overshooting the energy available, a physical constraint the exact
+    solution never breaks. Positions are compared with a ``reference_dt``
+    solution.
+
+    Parameters
+    ----------
+    dts : sequence of float
+        Time steps to test, s.
+    battery_j : float
+        Energy available, J.
+    t_end : float
+        Integration time, s; must be a whole number of every step in ``dts``
+        so that positions are compared at the same instant.
+    reference_dt : float
+        Step of the reference solution, s.
+
+    Returns
+    -------
+    dict
+        Predicted step limits per deployment and method, and per step the
+        largest energy overshoot (J) and final position error (m).
+    """
+    from scipy.optimize import brentq
+
+    steps = {dt: int(round(t_end / dt)) for dt in dts}
+    if any(abs(n * dt - t_end) > 1e-9 for dt, n in steps.items()):
+        raise ValueError("t_end must be a whole number of every time step")
+    car = CarParameters()
+    # Where |R(z)| = 1 on the negative real axis.
+    rk4_limit = -brentq(lambda z: rk4_amplification(z) - 1, -3.0, -2.0)
+    v0 = 200 / 3.6
+    out = {"dt": list(dts), "battery_j": battery_j, "t_end_s": t_end, "chosen_dt": simulator.TIME_STEP_S,
+           "real_axis_limit": {"euler": 2.0, "rk4": rk4_limit}, "deployments": {}}
+    for title, share in (("Boost", 1.0), ("Standard map", simulator.STANDARD_MAP_SHARE)):
+        state = CarState(mu=np.array([car.mu_reference]), cda_m2=np.array([car.cda_m2]),
+                         deploy_share=np.array([share]), energy_j=np.array([battery_j]))
+
+        def f(y, state=state):
+            accel, ers = acceleration(y[1:2], y[2:3], state, state.cda_m2, car)
+            return np.array([y[1], accel[0], ers[0]])
+
+        rate = share * car.mguk_power_w / car.energy_smoothing_j
+        reference = integrate(f, [0.0, v0, 0.0], reference_dt, int(round(t_end / reference_dt)))
+        row = {"share": share, "decay_rate_per_s": rate,
+               "predicted_dt_limit_s": {"euler": 2.0 / rate, "rk4": rk4_limit / rate}}
+        for method, step in (("euler", euler_step), ("rk4", rk4_step)):
+            overshoot, position_error = [], []
+            for dt in dts:
+                y, worst = np.array([0.0, v0, 0.0]), 0.0
+                for _ in range(steps[dt]):
+                    y = step(f, y, dt)
+                    worst = max(worst, y[2] - battery_j)  # energy used beyond what the battery holds
+                overshoot.append(float(worst))
+                position_error.append(float(abs(y[0] - reference[0])))
+            row[method] = {"max_energy_overshoot_j": overshoot, "final_position_error_m": position_error}
+        out["deployments"][title] = row
+    plots.stability(out, FIGURES / "stability.png")
+    return _write("stability", out)
 
 
 # --- 3. Quadrature and Monte Carlo ------------------------------------------
@@ -571,9 +667,18 @@ def real():
     return _write("real_data", result)
 
 
+# --- 9. Workflow diagram -------------------------------------------------------
+
+def diagram():
+    """Draw the workflow overview used in the documentation (no computation)."""
+    plots.workflow_diagram(FIGURES / "workflow.png")
+    return {"figure": str(FIGURES / "workflow.png")}
+
+
 EXPERIMENTS = {
     "solver": solver,
     "timestep": timestep,
+    "stability": stability,
     "quadrature": quadrature,
     "selection": selection,
     "ablation": ablation,
@@ -581,6 +686,7 @@ EXPERIMENTS = {
     "performance": performance,
     "sensitivity": sensitivity,
     "real": real,
+    "diagram": diagram,
 }
 
 
