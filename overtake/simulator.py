@@ -35,7 +35,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import expit, ndtr
 
-from .features import CIRCUITS, COMPOUNDS, CONDITIONS, LABEL, SEGMENTS
+from .features import (CIRCUITS, COMPOUNDS, CONDITIONS, LABEL, SEGMENTS, TRAINED_RUN_LENGTH_M,
+                       TRAINED_TRACK_TEMP_C)
 from .physics import (BATTERY_USABLE_J, OVERTAKE_MODE_EXTRA_J, CarParameters, CarState, rk4_step,
                       run_to_braking_point, two_car_rhs)
 
@@ -362,6 +363,11 @@ def monte_carlo_probability(df, n_runs, seed=1):
     return draw_outcomes(*repeated, rng).mean(axis=1)
 
 
+# Spread of the gap at the Overtake Mode detection point around the gap when
+# the attack starts (s): the two are measured at different places on the lap.
+DETECTION_GAP_SD_S = 0.2
+
+
 def sample_scenarios(n, rng):
     """Draw ``n`` varied race situations covering the whole input space.
 
@@ -399,7 +405,7 @@ def sample_scenarios(n, rng):
     seg = rng.choice(SEGMENTS, n, p=[0.55, 0.20, 0.15, 0.10])
     gap = rng.uniform(0.05, 2.0, n)
     # The gap at the detection point differs a little from the gap when the attack starts.
-    detection_gap = gap + rng.normal(0.0, 0.2, n)
+    detection_gap = gap + rng.normal(0.0, DETECTION_GAP_SD_S, n)
     return pd.DataFrame({
         "track_condition": cond,
         "segment": seg,
@@ -407,12 +413,14 @@ def sample_scenarios(n, rng):
         "attacker_tyre": tyres(),
         "defender_tyre": tyres(),
         "gap_s": gap,
-        "run_length_m": np.where(seg == "straight", rng.uniform(250, 1300, n), rng.uniform(50, 300, n)),
+        "run_length_m": np.where(seg == "straight", rng.uniform(*TRAINED_RUN_LENGTH_M["straight"], n),
+                                 rng.uniform(*TRAINED_RUN_LENGTH_M["corner"], n)),
         "attacker_battery": battery(),
         "defender_battery": battery(),
         "attacker_tyre_age": rng.integers(0, 41, n).astype(float),
         "defender_tyre_age": rng.integers(0, 41, n).astype(float),
-        "track_temp_c": np.where(cond == "dry", rng.uniform(18, 55, n), rng.uniform(10, 32, n)),
+        "track_temp_c": np.where(cond == "dry", rng.uniform(*TRAINED_TRACK_TEMP_C["dry"], n),
+                                 rng.uniform(*TRAINED_TRACK_TEMP_C["wet"], n)),
         "attacker_skill": rng.uniform(60, 100, n),
         "defender_skill": rng.uniform(60, 100, n),
         "top_speed_delta_kph": np.clip(rng.normal(0, 5, n), -15, 15),

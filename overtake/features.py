@@ -106,8 +106,9 @@ LABEL = "overtake"
 DERIVED = ["attacker_energy_cover", "defender_energy_cover"]
 RUN_SPEED_MPS = 80.0  # typical average speed along a straight, for the energy estimate
 
-# A typical attack: fresh softs, full battery, 1 s behind on an 800 m straight,
-# against a car on 15-lap-old mediums with 60% battery that also uses Boost.
+# A typical attack: nearly new softs (5 laps), full battery, 1 s behind on an
+# 800 m straight, against a car on 15-lap-old mediums with 60% battery that
+# also uses Boost.
 DEFAULTS = {
     "track_condition": "dry",
     "segment": "straight",
@@ -144,6 +145,38 @@ NUMERIC_RANGES = {
     "top_speed_delta_kph": (-30.0, 30.0),
     "pace_delta_s": (-3.0, 3.0),
 }
+
+# Defaults that depend on the situation: a run into a corner is short, and a
+# damp or wet track is cooler. The Python API and the command line share them
+# through `situational_defaults`.
+CORNER_RUN_LENGTH_M = 150.0
+WET_TRACK_TEMP_C = 20.0
+
+# Narrower ranges that the training data covers within the accepted ones
+# (`overtake.simulator.sample_scenarios` draws from exactly these). Predictions
+# outside them are extrapolation, and `OvertakePredictor.out_of_range` says so.
+TRAINED_RUN_LENGTH_M = {"straight": (250.0, 1300.0), "corner": (50.0, 300.0)}
+TRAINED_TRACK_TEMP_C = {"dry": (18.0, 55.0), "wet": (10.0, 32.0)}  # "wet" covers damp and wet
+
+
+def situational_defaults(segment, condition):
+    """Defaults that depend on where the move happens and on the weather.
+
+    Parameters
+    ----------
+    segment : str
+        One of `SEGMENTS`.
+    condition : str
+        One of `CONDITIONS`.
+
+    Returns
+    -------
+    dict
+        ``run_length_m``: 800 m on a straight, 150 m into a corner;
+        ``track_temp_c``: 35 C when dry, 20 C when damp or wet.
+    """
+    return {"run_length_m": DEFAULTS["run_length_m"] if segment == "straight" else CORNER_RUN_LENGTH_M,
+            "track_temp_c": DEFAULTS["track_temp_c"] if condition == "dry" else WET_TRACK_TEMP_C}
 
 
 def validate(df):
@@ -291,9 +324,19 @@ class Preprocessor:
 
 
 def as_frame(scenarios):
-    """Convert one scenario (dict), several (list of dicts) or a DataFrame to a DataFrame."""
+    """Convert scenarios to a DataFrame with one row per scenario.
+
+    Parameters
+    ----------
+    scenarios : dict, pandas.Series, list of dict or pandas.DataFrame
+        A single scenario (dict or Series, e.g. one DataFrame row), several, or a table.
+
+    Returns
+    -------
+    pandas.DataFrame
+    """
     if isinstance(scenarios, pd.DataFrame):
         return scenarios.reset_index(drop=True)
-    if isinstance(scenarios, dict):
-        scenarios = [scenarios]
+    if isinstance(scenarios, (dict, pd.Series)):
+        scenarios = [dict(scenarios)]
     return pd.DataFrame(list(scenarios))
