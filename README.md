@@ -38,7 +38,7 @@ Same situation at other gaps
 
 **Full write-up:** [docs/project_documentation.md](docs/project_documentation.md)
 (engineering problem, inputs and outputs, method, alternatives, validation,
-performance, limitations, AI use).
+performance, limitations, AI use). A PDF and Word copy are in `docs/`.
 
 ## Results at a glance
 
@@ -51,8 +51,10 @@ performance, limitations, AI use).
 
 Numerical verification: RK4 converges at order 4.0 and Euler at 1.0 against
 analytical solutions; the full model's braking-point error at the chosen step
-(0.05 s) is 0.059 ms; 16-point Gauss-Legendre quadrature is exact to
-round-off.
+(0.05 s) is 0.059 ms, and the step is 2.5 times inside the first battery
+overdraw (0.125 s), the stiffest part of the model; 16-point Gauss-Legendre
+quadrature is exact to round-off. The network predicts 20 times faster than
+direct simulation, including input checks.
 
 Real-world check against 17 races of the 2026 season (OpenF1 timing data,
 1,222 on-track passes after removing the start, pit stops and safety cars):
@@ -60,7 +62,7 @@ real top speeds respect the 355 km/h electrical-power limit, real acceleration
 matches the car model within about 10 km/h, and the circuit ranking agrees
 (rank correlation 0.65); but passes from 0.5-1 s behind are easier in the
 simulator than in real races, because real drivers ration battery energy over
-the lap (Section 5.4 of the documentation).
+the lap (Section 5.3 of the documentation).
 
 ![What-if curves](reports/figures/what_if.png)
 
@@ -88,7 +90,10 @@ predictor.predict({"track_condition": "dry", "attacker_tyre": "soft",
                    "segment": "straight", "attacker_battery": 100, "gap_s": 1.0})
 ```
 
-Fields left out take the defaults in `overtake/features.py`. Invalid inputs
+Fields left out (or set to `None`) take the defaults in `overtake/features.py`;
+the run length (800 m on a straight, 150 m into a corner) and track temperature
+(35 °C dry, 20 °C damp or wet) depend on the segment and weather. A pandas
+Series counts as one scenario. Invalid inputs, NaN and unknown field names
 raise a `ValueError` naming the field; inputs outside the training range give
 a warning.
 
@@ -100,21 +105,24 @@ OpenF1 once (about 4 minutes, internet needed) and caches it in `data/real/`.
 The spreadsheet export and the download cache are regenerated rather than
 stored in git because of their size.
 
-| Step | Command | Time (4-core CPU) | Output |
+Times are rough and machine-dependent.
+
+| Step | Command | Time | Output |
 |---|---|---|---|
-| Train the network and baselines | `python -m overtake.train` | ~4 min | `models/overtake_net.pt`, `reports/results/test_metrics.json` |
-| All experiments | `python -m overtake.experiments all` | ~20 min | `reports/results/*.json`, `reports/figures/*.png` |
-| One experiment | `python -m overtake.experiments solver` (or `timestep`, `quadrature`, `selection`, `ablation`, `comparison`, `performance`, `sensitivity`, `real`) | seconds to 10 min | |
+| Train the network and baselines | `python -m overtake.train` | ~4-10 min | `models/overtake_net.pt`, `reports/results/test_metrics.json` |
+| All experiments | `python -m overtake.experiments all` | ~30-45 min | `reports/results/*.json`, `reports/figures/*.png` |
+| One experiment | `python -m overtake.experiments solver` (or `timestep`, `stability`, `adaptive`, `quadrature`, `speed_trace`, `constants`, `rules`, `selection`, `ablation`, `baselines`, `comparison`, `performance`, `sensitivity`, `real`, `diagram`) | seconds to 10 min | |
+| Redraw every figure from the saved results | `python -m overtake.experiments figures` | seconds | `reports/figures/*.png` |
 | Comparison with real 2026 races | `python -m overtake.experiments real` | ~5 min first time (download), then ~1 min | `reports/results/real_data.json`, `reports/figures/real_*.png` |
-| Tests (66, all offline) | `python -m pytest` | ~30 s | |
-| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~30 s | `reports/test_report.html` |
+| Tests (84, all offline) | `python -m pytest` | ~2 min | |
+| Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~2 min | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |
 | The network by hand | `jupyter notebook notebooks/network_by_hand.ipynb` | seconds | one prediction recomputed from the saved weights with NumPy, checked against the library |
 | Spreadsheet of all simulation data | `python -m overtake.export` | ~2.5 min | `data/overtake_simulations.xlsx` (~65 MB, not in git) |
 
-`comparison`, `performance` and `sensitivity` use the trained model, so run
-`python -m overtake.train` first.
+`baselines`, `comparison`, `performance` and `sensitivity` use the trained
+model, so run `python -m overtake.train` first.
 
 To train on real labelled attempts instead of simulated ones:
 `python -m overtake.train --data attempts.csv` (the CSV needs every input
@@ -143,11 +151,11 @@ models/overtake_net.pt    trained ensemble of five networks (154 kB)
 reports/
   figures/                every figure in the documentation
   results/                every number in the documentation, as JSON; files named
-                          *_before_* or after a rule are earlier runs the
-                          documentation refers to
+                          *_before_*, *_after_*, *_3_seeds or *_min_rule are earlier
+                          runs the documentation refers to (Appendix D)
   test_report.html        pytest report
 docs/
-  project_documentation.md
+  project_documentation.md   the report (also as .pdf and .docx)
   api/                    HTML API documentation (pdoc)
   index.html              landing page for GitHub Pages
 ```

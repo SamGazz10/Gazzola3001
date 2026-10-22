@@ -1,77 +1,99 @@
 {
+  "environment": {
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "machine": "AMD64",
+    "logical_cpus": 16,
+    "torch_threads": 12,
+    "python": "3.13.5",
+    "numpy": "2.5.4",
+    "torch": "2.14.1+cpu",
+    "timing": "wall-clock time.perf_counter; best of 3 runs, or 1 run for the loop, chunk-size, simulation and data-generation timings"
+  },
   "profile_top_functions": [
     {
       "function": "physics.py:acceleration",
       "calls": 4512,
-      "own_seconds": 0.43887502300000003,
-      "share": 0.25785611983788026
-    },
-    {
-      "function": "physics.py:run_to_braking_point",
-      "calls": 1,
-      "own_seconds": 0.20466045400000002,
-      "share": 0.12024596476682835
-    },
-    {
-      "function": "physics.py:rk4_step",
-      "calls": 389,
-      "own_seconds": 0.20067573100000002,
-      "share": 0.11790478525657684
-    },
-    {
-      "function": "physics.py:mguk_power_limit",
-      "calls": 4512,
-      "own_seconds": 0.17595739500000002,
-      "share": 0.10338180291358534
-    },
-    {
-      "function": "physics.py:slipstream_factor",
-      "calls": 2256,
-      "own_seconds": 0.138772681,
-      "share": 0.08153433936056992
+      "own_seconds": 0.8821126,
+      "share": 0.22176141512583314
     },
     {
       "function": "_methods.py:_clip",
       "calls": 17547,
-      "own_seconds": 0.10173774000000001,
-      "share": 0.05977487326152781
+      "own_seconds": 0.4739589,
+      "share": 0.11915235807252185
+    },
+    {
+      "function": "physics.py:run_to_braking_point",
+      "calls": 1,
+      "own_seconds": 0.46934420000000004,
+      "share": 0.11799223134677145
+    },
+    {
+      "function": "physics.py:rk4_step",
+      "calls": 389,
+      "own_seconds": 0.4260836,
+      "share": 0.1071165995111162
+    },
+    {
+      "function": "physics.py:slipstream_factor",
+      "calls": 2256,
+      "own_seconds": 0.3951771,
+      "share": 0.09934676471158316
+    },
+    {
+      "function": "physics.py:mguk_power_limit",
+      "calls": 4512,
+      "own_seconds": 0.25398590000000004,
+      "share": 0.06385156793589429
     },
     {
       "function": "physics.py:_hermite",
       "calls": 3500,
-      "own_seconds": 0.080576466,
-      "share": 0.04734180298296192
+      "own_seconds": 0.22859520000000003,
+      "share": 0.05746839467316628
     },
     {
       "function": "shape_base.py:stack",
       "calls": 2257,
-      "own_seconds": 0.072217905,
-      "share": 0.04243082378857694
+      "own_seconds": 0.1526992,
+      "share": 0.038388285895227685
     }
   ],
+  "profile_stage_shares": {
+    "overtake_integral": 0.007187923660760311,
+    "outcome_parameters": 0.012962688426947148,
+    "sample_scenarios": 0.010753276389489136,
+    "closing_run": 0.9664159062985048,
+    "draw_outcomes": 0.0004297650199732004
+  },
   "vectorisation_200_scenarios": {
-    "loop_seconds": 10.83645643499949,
-    "vectorised_seconds": 0.22987512500003504,
-    "speedup": 47.1406222617512
+    "loop_seconds": 24.57085559994448,
+    "vectorised_seconds": 0.5415205999743193,
+    "speedup": 45.373815144077085
   },
   "chunk_size_40k_scenarios": [
     {
       "chunk": 1000,
-      "seconds": 14.018309609000426
+      "seconds": 22.163690299959853
     },
     {
       "chunk": 5000,
-      "seconds": 4.85193729599996
+      "seconds": 6.817468199995346
     },
     {
       "chunk": 20000,
-      "seconds": 3.0873454550001043
+      "seconds": 4.2288403999991715
     },
     {
       "chunk": 40000,
-      "seconds": 3.0004101390004507
+      "seconds": 4.841713400091976
     }
   ],
+  "loop_to_final_design": {
+    "loop_us_per_scenario": 122854.2779997224,
+    "chunked_us_per_scenario": 105.72100999997929,
+    "speedup": 1162.0611456487832
+  },
   "flops": {
     "network_hidden": [
       64,
@@ -79,22 +101,33 @@
     ],
     "network_members": 5,
     "network_flops_per_prediction": 66565,
-    "network_gflops_achieved": 81.19851521589725,
-    "network_us_per_prediction_batch_10k": 0.8197809999728634,
+    "network_gflops_achieved": 29.649541591349003,
+    "network_gflops_achieved_batch_1024": 17.12084779723673,
+    "network_us_per_prediction_batch_10k": 2.245060005225241,
     "simulation_mean_rk4_steps": 153.3369399499436,
     "simulation_flops_per_scenario_estimate": 68601.60133777496,
-    "simulation_gflops_achieved": 0.6871816858562271,
-    "simulation_us_per_scenario": 99.83036909998191,
+    "simulation_gflops_achieved": 0.5282849670305613,
+    "simulation_us_per_scenario": 129.8571899998933,
     "network_arithmetic_intensity_flop_per_byte": {
       "1": 0.504601413020407,
       "64": 30.324876854303692,
       "1024": 251.4815306739865,
       "10000": 446.21190792207966
-    }
+    },
+    "simulation_arithmetic_intensity_flop_per_byte_estimate": 0.041666666666666664,
+    "simulation_implied_bandwidth_gb_per_s": 12.678839208733471
   },
   "memory": {
     "network_parameter_bytes": 131780,
     "dataset_300k_bytes": 115198461,
-    "ode_state_bytes_per_20k_chunk": 960000
+    "ode_state_bytes_per_20k_chunk": 960000,
+    "simulation_peak_bytes_per_20k_chunk": 12428283
+  },
+  "training_pipeline": {
+    "data_generation_seconds_300k": 33.23992439999711,
+    "one_epoch_one_network_seconds": 6.792786000063643,
+    "ensemble_training_seconds": 207.93907979800133,
+    "first_network_epochs": 53,
+    "note": "ensemble_training_seconds was measured when the model was trained (python -m overtake.train, another machine); the rest is timed here"
   }
 }

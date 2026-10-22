@@ -1,721 +1,472 @@
-# Probability of an F1 overtake under the 2026 rules
+# Probability of an F1 overtake under the 2026 Boost and Overtake Mode rules
 
-MMA3001 Numerical Methods and Machine Learning, individual project. Sam Gazzola.
+**MMA3001 Numerical Methods and Machine Learning: individual project report**
+Sam Gazzola · Repository <https://github.com/SamGazz10/Gazzola3001> · October 2026
 
-Repository: <https://github.com/SamGazz10/Gazzola3001>. API documentation:
-`docs/api/` (generated from the docstrings with pdoc). Every number below is
-produced by code in the repository; the command that regenerates it is given
-with each result.
+Every number in this report is produced by code in the repository from fixed
+random seeds; Appendix D lists the command that regenerates each result. Code
+documentation (generated from the docstrings) is in `docs/api/`.
 
 ## Summary
 
-In 2026 Formula 1 replaced DRS with an electrical overtaking aid: a car within
-one second of the car ahead gets **Overtake Mode** (extra battery energy and a
-higher speed limit for electrical power), and either driver can use **Boost**
-(maximum engine plus battery power) anywhere. Whether an attack succeeds now
-depends on how much battery energy each car has left, not just on the gap.
-
-This project estimates **P(overtake)**, the probability that an attacker
-completes a pass, from 19 inputs describing the situation (gap, battery
-charge, Boost and Overtake Mode use, tyres, weather, where on the lap, drivers,
-cars, circuit). It has two parts:
-
-1. A **physics-based simulator**. The two cars' equations of motion are
-   integrated with fourth-order Runge-Kutta (RK4) from the corner exit to the
-   braking point; random execution variation then decides the outcome. The
-   exact probability is a one-dimensional integral, evaluated by
-   Gauss-Legendre quadrature. The simulator generates training data with a
-   known ground truth.
-2. A **neural network** (an ensemble of five) that learns P(overtake) from
-   0/1 outcomes only, as it would have to with real race data, and is
-   validated against that ground truth.
-
-On 30,000 held-out attempts the network's probabilities are within
-2.0 percentage points of the truth on average (gradient-boosted trees:
-3.8; logistic regression: 15.7). For the default scenario (dry, new
-softs, full battery, 1 s behind on an 800 m straight, Boost and Overtake
-Mode) the simulator gives 47% and the network 44%;
-without Boost the chance falls below 1 %.
-
-Compared with 17 real 2026 races (1,222 on-track passes, OpenF1 timing data),
-the simulator's physics holds up (real top speeds respect the 355 km/h limit;
-real acceleration matches the car model within about 10 km/h) and its circuit
-ranking agrees moderately (rank correlation 0.65), but it makes passes from
-0.5-1 s behind too easy, because real drivers ration battery energy over the
-lap (Section 5.4).
-
----
+From 2026 a Formula 1 car within 1 s of the car ahead gets **Overtake Mode**
+(0.5 MJ of extra battery energy and electrical power to a higher speed)
+instead of DRS, and either driver can use **Boost**, the maximum engine plus
+battery power. This project estimates the probability that an attempt
+succeeds, P(overtake), from 19 inputs. A physics simulator integrates both
+cars' equations of motion with fourth-order Runge-Kutta (RK4) and gives the
+exact probability by Gauss-Legendre quadrature; a neural network trained only
+on simulated 0/1 outcomes predicts it 20 times faster, with a mean error of
+2.0 percentage points on 30,000 held-out attempts (gradient boosting 3.8,
+logistic regression 15.7). Against 17 real 2026 races the physics holds up,
+but the simulator makes passes from 0.5-1 s behind too easy, because real
+drivers ration battery energy across the lap.
 
 ## 1. Engineering problem
 
-**Context.** The 2026 power unit takes roughly half its peak power from the
-350 kW MGU-K (the electric motor-generator), but the battery holds only a few
-megajoules: at full power it empties in about ten seconds, less than one long
-straight. A car that runs out of electrical energy ("clips") loses tens of
-km/h at the end of a straight. Overtaking is therefore an energy-management
-problem: when to deploy, when to save, and when an attack is worth the energy.
-The regulations limit electrical power above 290 km/h; Overtake Mode moves
-that limit to 337 km/h and adds 0.5 MJ [1-4].
+**Context.** The 2026 power unit pairs a 400 kW engine with a 350 kW electric
+motor-generator (MGU-K) on the rear axle and a battery of about 4 MJ usable
+energy [1, 2, 5, 6], which full electrical power empties in about 11 s, less
+than one long straight. Electrical power also tapers from 290 km/h to zero at
+355 km/h; Overtake Mode, earned within 1 s of the car ahead at a detection
+point, adds 0.5 MJ and full power to 337 km/h [1-4]. Overtaking has become a
+mechanical-engineering problem of longitudinal vehicle dynamics and
+hybrid-powertrain energy management: traction, drag, slipstream and how much
+energy each car can deploy over the remaining distance.
 
-**Problem.** Given the situation at the exit of the corner before a straight,
-estimate the probability that the attacker completes the pass at the end of
-that straight (or into the next corner).
+**Problem.** Given the situation as the attacker leaves the corner before a
+straight, estimate the probability that the attacker is ahead at the braking
+point at the end of the straight and the move sticks.
 
-**Why it matters.** Teams decide every lap whether to attack or harvest
-energy, and drivers decide when to use Boost. A quick, calibrated probability
-lets a strategist compare options ("attack now with 60 % battery, or wait a lap
-and arrive with 90 %?"). Regulators tune the Overtake Mode parameters to make
-overtaking possible but not trivial; the same model shows how sensitive the
-outcome is to those parameters.
+**Why it matters.** Teams decide every lap whether to attack or recharge, and
+drivers when to use Boost. A fast, calibrated probability lets a strategist
+compare options ("attack now with 60 % charge, or next lap with 90 %?") and
+shows rule makers which Overtake Mode parameter changes overtaking, and for
+whom (Section 5.4).
 
-**Intended use.** Decision support and what-if analysis: evaluating many
-situations quickly, and a training pipeline that can be retrained, or
-fine-tuned, on real labelled overtaking attempts.
+**Intended use.** Decision support and what-if analysis, where many situations
+must be evaluated quickly, and a training pipeline that can be retrained on
+real labelled attempts (`python -m overtake.train --data`) once they exist.
 
-**Limits of the scope.**
+**Scope and its limits.** One attempt on one straight, without energy strategy
+across the lap; driver skill is one rating; safety cars and damage are out of
+scope. Battery charge and Boost use are not in public timing data, so the
+training data are simulated and the network can only be as right as the
+simulator. In return the ground truth is exact, which makes rigorous
+validation possible.
 
-* One attempt on one straight; no multi-lap battles or energy strategy across
-  a lap.
-* Training data are simulated. Battery charge and Boost use are not in public
-  timing data, so the simulator stands in for real data. The network can only
-  be as right as the simulator, and many simulator constants are engineering
-  estimates (Section 3.2).
-* Driver ability is a single rating; team orders, safety cars, blue flags and
-  damage are not modelled.
+## 2. Inputs, outputs and data
 
-## 2. Inputs and outputs
+**Inputs.** A scenario is one row (a Python dict, pandas row or CSV row) with
+the 19 fields of Table 1. Omitted fields take the defaults, which together
+form the *default scenario* used throughout this report.
 
-### Inputs
+*Table 1. Inputs (accepted range, with the training range in brackets where narrower).*
 
-One scenario is one row (a Python dict, a pandas DataFrame row, or a CSV row).
-
-| Input | Type and units | Domain accepted | Training range |
+| Input | Meaning and units | Accepted (trained) | Default |
 |---|---|---|---|
-| `track_condition` | category | `dry`, `damp`, `wet` | all |
-| `segment` | category: where the move completes | `straight`, `slow_corner`, `medium_corner`, `fast_corner` | all |
-| `circuit` | category | 24 circuits or `generic` | all |
-| `attacker_tyre`, `defender_tyre` | category | `soft`, `medium`, `hard`, `intermediate`, `wet` | all |
-| `gap_s` | gap at the corner exit, s | 0-3 | 0.05-2.0 |
-| `run_length_m` | corner exit to braking point, m | 10-2000 | 250-1300 (straights), 50-300 (corners) |
-| `attacker_battery`, `defender_battery` | state of charge, % | 0-100 | 0-100 (15 % at exactly 100) |
-| `attacker_tyre_age`, `defender_tyre_age` | laps | 0-80 | 0-40 |
-| `track_temp_c` | deg C | 0-70 | 18-55 dry, 10-32 wet |
-| `attacker_skill`, `defender_skill` | rating 0-100 | 0-100 | 60-100 |
-| `top_speed_delta_kph` | attacker car's straight-line advantage, km/h | -30 to 30 | -15 to 15 |
-| `pace_delta_s` | attacker car's lap-time advantage, s/lap | -3 to 3 | -1.5 to 1.5 |
-| `attacker_boost`, `defender_boost` | bool | true/false, 1/0 | both |
-| `overtake_mode` | bool: within 1 s at the detection point | true/false, 1/0 | both |
+| `gap_s` | gap at the corner exit, s | 0-3 (0.05-2.0) | 1.0 |
+| `run_length_m` | corner exit to braking point, m | 10-2000 (250-1300 straights, 50-300 corners) | 800 (150 into a corner) |
+| `attacker_battery`, `defender_battery` | state of charge, % of 4 MJ | 0-100 | 100, 60 |
+| `attacker_boost`, `defender_boost` | Boost used, flag | true/false or 1/0 | true, true |
+| `overtake_mode` | within 1 s at the detection point, flag | true/false or 1/0 | `gap_s` ≤ 1 |
+| `attacker_tyre`, `defender_tyre` | soft, medium, hard, intermediate, wet | listed | soft, medium |
+| `attacker_tyre_age`, `defender_tyre_age` | laps | 0-80 (0-40) | 5, 15 |
+| `track_condition`, `track_temp_c` | dry, damp or wet; °C | listed; 0-70 (10-55) | dry, 35 (20 damp or wet) |
+| `segment` | where the move completes: straight, slow, medium or fast corner | listed | straight |
+| `circuit` | one of 24 circuits, or `generic` | listed | generic |
+| `attacker_skill`, `defender_skill` | racecraft rating (grid about 60-100) | 0-100 (60-100) | 85, 85 |
+| `top_speed_delta_kph`, `pace_delta_s` | attacker car's advantage: straight-line speed, km/h; lap time, s/lap | ±30 (±15); ±3 (±1.5) | 0, 0 |
 
-### Output
+**Output.** P(overtake), the probability between 0 and 1 that this attempt
+succeeds. It is calibrated against the simulator (Section 5.2): among
+situations predicted at 30 %, about 30 % succeed in simulation, so options can
+be compared directly. Real pass rates are lower at 0.5-1 s (Section 5.3).
 
-`P(overtake)`, a probability between 0 and 1: the chance that this attempt
-succeeds. It is calibrated, so among many situations predicted at 30 %, about
-30 % should succeed (verified in Section 5.2). The command-line tool also
-reports the probability without Boost and at other gaps.
+**Invalid, missing and unsupported inputs.** An unknown category or field
+name, a value outside the accepted range, text, NaN, a non-boolean flag or a
+missing column raises a `ValueError` naming the field and the allowed values
+(the command line exits with status 2). Omitted or `None` fields take their
+defaults. Values outside the training range, or Overtake Mode inconsistent
+with the gap, are predicted with a warning (Section 5.2 measures the cost); a
+missing model file raises an error explaining how to train one. Function-level
+inputs, outputs and exceptions are in NumPy-style docstrings (`docs/api/`).
 
-### Invalid, missing and unsupported inputs
+**Data.** 300,000 simulated attempts (inputs sampled across the training
+ranges; 15 % of batteries start full; 27 % succeed), split 80/10/10 into
+training, validation and test sets and regenerated from fixed seeds. Real
+timing data from 17 races of the 2026 season (OpenF1 [15]) are used for
+validation only.
 
-| Case | Handling |
-|---|---|
-| Unknown category, number outside the domain, non-numeric number, non-boolean flag, missing column | `ValueError` naming the column and the allowed values (`features.validate`); the command line prints it and exits with status 2 |
-| Field omitted or `None` when predicting | Default value from `features.DEFAULTS`; `overtake_mode` defaults to `gap_s <= 1` |
-| Inside the domain but outside the training range | Accepted; `OvertakePredictor.out_of_range` returns a warning and the command line prints it, because the prediction is extrapolation (Section 5.2 measures the cost) |
-| Missing trained model | `FileNotFoundError` telling the user to run `python -m overtake.train` |
-| Training CSV without a 0/1 `overtake` column | `ValueError` |
+## 3. Computational approach
 
-Inputs and outputs of each function and class are documented in their
-docstrings and the generated API documentation.
+<img src="../reports/figures/workflow.png" alt="Workflow" width="88%">
 
-## 3. Computational solution
+*Figure 1. Workflow. Top: the simulator generates 0/1 outcomes on which the
+network is trained. Bottom: what checks each part.*
 
-### 3.1 Overview
+### 3.1 Physical model (`overtake/physics.py`)
 
-```
-scenario ──► initial conditions ──► two-car ODE, RK4 ──► deficit D at braking point
-                                                              │
-                     execution noise ε ~ N(0, σ), completion logit z0
-                                                              │
-               ┌──────────────────────────────────────────────┴───────────┐
-       draw ε, u ──► 0/1 outcome                    Gauss-Legendre ──► exact P
-       (training labels)                            (ground truth, validation only)
-               │
-       neural network learns P from outcomes ──► validated against exact P
-```
+Each car is a point mass moving along the straight, with position $x$, speed
+$v$ and battery energy used $e$:
 
-### 3.2 Physical model of the closing phase (`overtake/physics.py`)
+$$\dot x = v, \qquad m\,\dot v = \min(F_P, F_T) - F_D - F_R, \qquad \dot e = P_E .$$
 
-Each car has position x, speed v and battery energy used e:
+* **Drive force** $F_P = \eta\,(P_{ICE} + P_E)/v$, with electrical power
+  $P_E = s\,P_K(v)\,\min\big(1, (E-e)/S\big)$: $P_K$ is 350 kW to 290 km/h,
+  falling to zero at 355 km/h (full power to 337 km/h with Overtake Mode); the
+  deployment share $s$ is 1 with Boost and 0.55 on the standard map; $E$ is
+  the energy available; over the last $S = 20$ kJ the power fades out, keeping
+  the equations continuous.
+* **Traction limit** $F_T = \mu\,w_r\,(mg + \tfrac12\rho C_LA\,v^2)$ of the
+  driven rear tyres; it limits acceleration below about 200 km/h with Boost
+  and carries tyre compound, age, temperature and wetness through the grip $\mu$.
+* **Drag** $F_D = \tfrac12\rho\,C_DA\,k\,v^2$, where the follower's slipstream
+  factor $k = 1 - 0.25\,e^{-\Delta x/20\,\mathrm{m}}$ fades to 1 over one car
+  length as it draws alongside. **Rolling resistance**
+  $F_R = c_{rr}(mg + \tfrac12\rho C_LA\,v^2)$.
 
-    dx/dt = v
-    m dv/dt = min(F_power, F_traction) - F_drag - F_rolling
-    de/dt = P_ers
+The slipstream couples the cars, so all six states are integrated together
+until the defender reaches the braking point, giving the attacker's remaining
+time deficit $D$. Assumed: a flat straight without wind; constant mass and
+low-drag aero coefficients; full throttle from the same corner-exit speed on
+every straight; one deployment level per driver, no reaction to the other
+car; the whole charge available for this straight.
 
-* `F_power = η (P_ICE + P_ERS) / v`. `P_ERS` is the MGU-K power: 350 kW,
-  reduced linearly from 290 km/h to zero at 355 km/h (from 337 km/h with
-  Overtake Mode), multiplied by 1 with Boost or 0.55 on the standard energy
-  map, and ramped to zero as the available energy runs out.
-* `F_traction = μ w_r (m g + ½ ρ C_L A v²)`: the most the driven rear tyres can
-  transmit. Below about 180 km/h this limits acceleration, which is how tyre
-  compound, age, temperature and wetness enter.
-* `F_drag = ½ ρ C_D A v²`. The follower's `C_D A` is cut by up to 25 % in the
-  slipstream, decaying with distance (e-folding length 20 m) and fading out
-  over one car length as it draws alongside.
-* `F_rolling = c_rr (m g + ½ ρ C_L A v²)`.
-
-The cars are coupled through the slipstream, so all six states are integrated
-together. Integration stops when the defender reaches the braking point; the
-result is the attacker's remaining deficit D (seconds).
+*Table 2. Main parameters (all constants in Appendix E).*
 
 | Parameter | Value | Source |
 |---|---|---|
-| MGU-K power, taper | 350 kW; 290→355 km/h; Overtake Mode 337 km/h | 2026 regulations as reported [1, 2, 4] (some reports give 340/345 km/h) |
-| Overtake Mode energy | +0.5 MJ | [1] |
-| ICE power | 400 kW | reported target [5] |
-| Usable battery energy | 4 MJ at 100 % | estimate; storage capacity reported unchanged from previous rules [6] |
-| Mass | 800 kg | estimate: 2026 minimum ~768 kg plus fuel |
-| C_D A, C_L A (straight mode) | 1.0 m², 3.0 m² | estimates, checked against top speeds below |
-| Tyre μ (new soft, dry), rolling coefficient, efficiency | 1.7, 0.012, 0.95 | estimates |
-| Slipstream | 25 % at 0 m, 20 m decay | estimate |
+| MGU-K power; taper; Overtake Mode | 350 kW; 290 → 355 km/h; full power to 337 km/h and +0.5 MJ | regulations [1, 2, 4, 7] |
+| Engine power; usable battery energy | 400 kW; 4 MJ | [5]; estimate [6] |
+| Mass; $C_DA$, $C_LA$ | 800 kg; 1.0 m², 3.0 m² | estimates (768 kg minimum plus fuel) |
+| $\mu$ (new soft, dry), $c_{rr}$, $\eta$; slipstream | 1.7, 0.012, 0.95; 25 % less drag, 20 m decay | estimates |
+| Corner-exit speed | 33 m/s × √(relative grip); up to 6 % grip lost in dirty air | estimate, the most influential (Section 5.4) |
 
-*Plausibility checks* (`python -m overtake.experiments` and `simulator.speed_trace`):
-with these values a car reaches about 348 km/h at the end of an 800 m
-straight with Overtake Mode and about 330 km/h without it (the power taper
-above 290 km/h), about 303 km/h with no electrical power at all, and a car
-whose battery empties mid-straight levels off near 300 km/h, consistent
-with reported 2026 top speeds and "clipping" behaviour. These checks are
-coarse; they do not validate individual parameters.
+A car on a full battery reaches about 345 km/h after 800 m with Boost and
+Overtake Mode, 330 with Boost alone, 319 on the standard map and 288 with no
+electrical power (top speed 303 km/h), consistent with real speed traps
+(Section 5.3; Figure A2).
 
-![Speed traces](../reports/figures/speed_trace.png)
+### 3.2 Numerical methods
 
-### 3.3 Numerical methods
+**Time integration: RK4 with a fixed step of 0.05 s.** RK4 is fourth-order
+accurate for four right-hand-side evaluations per step (forward Euler: first
+order; Section 4). Being explicit, it is stable only while $\lambda\,\Delta t$
+stays within about 2.785 on the negative real axis, $\lambda$ being the
+fastest decay rate in the system. That is not the car's speed (at most about 1 s⁻¹)
+but the battery ramp, where $\dot e \propto (E - e)$ decays at
+$\lambda = sP_K/S = 17.5$ s⁻¹ with Boost: linear theory puts the limit at
+0.16 s, and the battery is first overdrawn at 0.125 s (Figure A4). The 0.05 s
+step, set by the accuracy study (Section 6), leaves a margin of 2.5.
 
-**RK4 time integration.** The system is a small non-stiff initial value
-problem: the fastest physical time scale is the drag response,
-`m / (ρ C_D A v) ≈ 8 s` at 80 m/s, so an explicit method is stable for any
-step small enough to be accurate. RK4 was chosen over forward Euler because it is fourth order for
-four function evaluations per step (Section 4 compares them). The step is
-fixed at **dt = 0.05 s** from the time-step study (Section 6.1).
+**Braking-point crossing.** Straight-line interpolation within the crossing
+step is second-order accurate (0.20 ms worst deficit error at 0.05 s, against
+0.059 ms), so the crossing time is found by four Newton iterations, converged
+to round-off, on the step's cubic Hermite interpolant (fourth order).
+Scenarios are **vectorised**: integrated together as NumPy arrays in chunks
+of 20,000, each leaving the active set at its braking point.
 
-**Locating the braking point.** The defender crosses the braking point
-partway through a step. Linear interpolation would be second-order accurate
-and spoil RK4's accuracy, so the crossing time is found by Newton iteration on
-the cubic Hermite interpolant through the step's end states and derivatives
-(fourth-order accurate), and every state is interpolated to that instant.
+### 3.3 Outcome model and exact probability (`overtake/simulator.py`)
 
-**Vectorisation.** All scenarios in a chunk of 20,000 are integrated together
-as NumPy arrays; a scenario leaves the active set when its defender crosses
-the braking point.
+Execution varies between attempts: the attacker's effective deficit is
+$D - \varepsilon$ with $\varepsilon \sim N(0, \sigma)$, $\sigma = 0.20$ s in the
+dry (0.24 damp, 0.28 wet, more for lower-rated drivers); $D$ also includes
+caution on a wet track and a strong defender's positioning. Within
+$L = 0.15$ s the attacker can lunge; with margin $u = \varepsilon - (D - L)$
+the move sticks with probability $\mathrm{logistic}(z_0 + 5\min(u, 0.5))$,
+where $z_0$ combines driver ratings, braking grip, corner type, weather,
+circuit passability and the defender's remaining Boost energy (estimated
+constants, Appendix E). The exact probability is a one-dimensional integral,
 
-### 3.4 Outcome model and exact probability (`overtake/simulator.py`)
+$$P = \int_0^\infty \phi_\sigma(u + D - L)\;\mathrm{logistic}\big(z_0 + 5\min(u, 0.5)\big)\,du ,$$
 
-The deficit D is increased slightly for caution in the wet and for the
-defender's positioning. Driver execution varies from attempt to attempt:
-ε ~ N(0, σ), σ = 0.20 s dry (0.24 damp, 0.28 wet, more for lower-rated
-attackers). The attacker can lunge if `D - ε` is within 0.15 s; the margin is
-`u = ε - (D - 0.15)`, and the lunge sticks with probability
-`logistic(z0 + 5 min(u, 0.5))`, where `z0` combines driver ratings, braking
-grip, corner type, weather and circuit. These constants are estimates chosen
-so that representative scenarios give plausible results (e.g. near 0 % without
-Boost against a Boosting defender; about 75 % from 0.5 s behind).
+with $\phi_\sigma$ the normal density of $\varepsilon$. The integral is split at
+the kink $u = 0.5$ s: the tail has a closed form, and the smooth part is
+evaluated with 16-point Gauss-Legendre quadrature, exact for polynomials up
+to degree 31. Training labels are random draws of $\varepsilon$ and of
+success; the exact $P$ is used only to validate.
 
-Because the only randomness is ε (plus the final success draw), the exact
-probability is
+### 3.4 Neural network (`overtake/model.py`, `overtake/train.py`)
 
-    P = ∫₀^∞ φ_σ(u + D − 0.15) · logistic(z0 + 5 min(u, 0.5)) du.
+Categorical inputs pass through learned embeddings (circuit 6 numbers, tyre
+4, weather 2, segment 3); numeric inputs are standardised with training-set
+statistics. The resulting 33 numbers feed a multilayer perceptron with two
+hidden layers of 64 SiLU units, dropout 0.1 and a sigmoid output: 6,589
+parameters. It is trained on 0/1 outcomes with binary cross-entropy, AdamW
+[10] (learning rate 2×10⁻³, halved after three epochs without improvement;
+weight decay 10⁻⁴), batches of 1,024, and early stopping on the validation
+loss (patience 5 epochs, at most 100); these are common defaults, while the
+layer sizes and the ensemble of five networks (seeds 0-4) were chosen on
+validation data (Section 6). A network was chosen because it learns from 0/1
+outcomes alone, as it would from recorded attempts, and captures interactions
+simpler models cannot (battery charge matters far more on a long straight
+than into a corner).
 
-The integrand has a kink at u = 0.5, so the integral is split there: the tail
-`[0.5, ∞)` has a closed form, and `[0, 0.5]` (smooth) uses 16-point
-Gauss-Legendre quadrature.
+### 3.5 Implementation and reproducibility
 
-### 3.5 Neural network (`overtake/model.py`, `overtake/train.py`)
-
-* **Inputs.** Each categorical input passes through a learned embedding
-  (condition 2, segment 3, circuit 6, tyre 4 dimensions; both tyre columns
-  share one tyre embedding). Numeric inputs are standardised with training-set
-  statistics; flags are 0/1. Width of the first layer: 33. (Two
-  physics-informed inputs were tested and not adopted; Section 5.2.)
-* **Architecture.** Two hidden layers of 64 units, SiLU activation, dropout
-  0.1, one output logit; sigmoid gives P. 6,589 parameters per network. Chosen from
-  four sizes on the validation set by the one-standard-error rule (Section 6.3).
-* **Ensemble.** Five such networks are trained identically from seeds 0-4;
-  the prediction is the mean of their probabilities. This cut the mean error
-  by about 10 % (Section 5.2) at five times the training and
-  prediction cost (Section 6.4).
-* **Training.** Binary cross-entropy on 0/1 outcomes; AdamW (learning rate
-  2×10⁻³, weight decay 10⁻⁴), batch 1024, learning rate halved after 2
-  epochs without improvement; early stopping after 5 epochs without
-  improvement, restoring the best weights; at most 100 epochs. Seeds are fixed
-  so runs repeat.
-* **Data.** 300,000 simulated attempts (overtake rate 28%), split
-  80 / 10 / 10 into training, validation and test sets.
-
-### 3.6 Implementation and reproducibility
-
-| Module | Role |
-|---|---|
-| `features.py` | input schema, defaults, validation, preprocessing |
-| `physics.py` | equations of motion, Euler and RK4, Hermite crossing |
-| `simulator.py` | scenario sampling, outcomes, quadrature, Monte Carlo |
-| `model.py`, `train.py` | network, training, metrics |
-| `baselines.py` | logistic regression, gradient boosting |
-| `predict.py` | command line and Python API |
-| `experiments.py`, `plots.py` | every study and figure in this document |
-| `export.py` | spreadsheet of all simulation data and results |
-| `realdata.py` | download of real 2026 race data (OpenF1) and comparison with the simulator |
-
-`python -m overtake.train` (about 4 minutes on a 4-core CPU) and
-`python -m overtake.experiments all` (about 20 minutes) regenerate all
-results; `python -m overtake.export` writes every simulated attempt (inputs,
-physics results, outcome, true and predicted probabilities), the metric and
-input lists and every experiment's results to one spreadsheet; `python -m pytest` runs 66 tests (offline: the real-data tests use small hand-made inputs). `notebooks/network_by_hand.ipynb` recomputes the default prediction from the saved weights with NumPy, layer by layer, and checks it and one training gradient against the library.
+The package `overtake` has one module per stage (schema, physics, simulator,
+network, training, baselines, prediction, experiments, figures, export, real
+data); 84 pytest tests cover the numerics, pipeline and notebooks, and
+`notebooks/network_by_hand.ipynb` reproduces a prediction step by step.
+`python -m overtake.train` and `python -m overtake.experiments all`
+regenerate every result; work was done on Git feature branches merged into
+`main`.
 
 ## 4. Alternative solutions
 
-**Numerical methods.**
+*Table 3. Numerical methods.*
 
 | Choice | Alternative | Evidence | Decision |
 |---|---|---|---|
-| RK4 | Forward Euler | At dt = 0.05 s Euler's worst error is 1.3e-02 s against 5.9e-05 s for RK4; Euler needs far smaller steps for the same accuracy and costs more overall (Section 6.1) | RK4 |
-| Gauss-Legendre (16 nodes) | Composite Simpson, trapezoid, Monte Carlo | 12 nodes already reach 2×10⁻¹⁵; Simpson needs 257 points for 3×10⁻¹¹; Monte Carlo with 1,600 replays has 0.7-point RMS error and is ~200× slower | Gauss-Legendre |
+| RK4 | Forward Euler | Worst deficit error at 0.05 s: 13 ms against 0.059 ms; Euler needs 4.6 times RK4's run time to meet 1 ms, 46 times to match it; overdraws the battery from 0.075 s (RK4: 0.125 s) | RK4 |
+| Fixed-step RK4, vectorised | Adaptive RK45 with events (SciPy [17]), one scenario at a time | At tolerance 10⁻⁶: 0.45 ms worst error (RK4: 0.024 ms, same 100 scenarios) at about 570 times the cost; adaptive steps cannot be shared across a batch | RK4 |
+| Hermite crossing | Straight-line interpolation | 0.059 against 0.20 ms at 0.05 s, same cost | Hermite |
+| 16-point Gauss-Legendre | Simpson, trapezoid, Monte Carlo | 12 nodes reach 2×10⁻¹⁵; Simpson needs 257 points for 3×10⁻¹¹; Monte Carlo (1,600 replays) 0.7 points RMS, 167 times slower | Gauss-Legendre |
 
-**Models.** All use the same inputs and training data. Results on the test set
-(`python -m overtake.experiments comparison`):
+*Table 4. Learned models (same inputs and training data) against direct simulation on 30,000 test attempts; 95 % bootstrap interval in brackets; by region in Figure A1.*
 
-| | Neural network (ensemble of 5) | Gradient boosting | Logistic regression | Direct simulation |
+| | Neural network (5) | Gradient boosting | Logistic regression | Direct simulation |
 |---|---|---|---|---|
-| Mean error vs truth (points) | 2.0 | 3.8 | 15.7 | 0 (it is the truth) |
-| Log loss | 0.257 | 0.267 | 0.411 | - |
-| ROC AUC | 0.948 | 0.944 | 0.853 | - |
-| Calibration error | 0.005 | 0.014 | 0.004 | - |
-| Training time | 208 s | 4 s | 3 s | none |
-| Prediction time (µs per scenario, batch of 10k, incl. input checks) | 4.1 | 8.6 | 3.7 | 95 |
+| Mean error against exact P (points) | **2.0** (2.0-2.1) | 3.8 (3.7-3.8) | 15.7 (15.5-15.8) | 0 (it is the truth) |
+| Worst error (points) | **58.7** | 70.0 | 98.9 | 0 |
+| Error, unsuited tyres / 1,300-2,000 m straights (points) | **2.6 / 4.4** | 5.7 / 9.7 | 27.5 / 26.9 | 0 / 0 |
+| Log loss / ROC AUC | **0.257** / **0.948** | 0.267 / 0.944 | 0.411 / 0.853 | 0.252 / 0.949 |
+| Calibration error | 0.005 | 0.014 | 0.004 | 0.004 |
+| Training time | 208 s | 9 s | 3 s | none |
+| Prediction (µs per scenario, incl. input checks) | 12 | 17 | 9 | 246 |
 | Model size | 132 kB | 1,139 kB | 4 kB | - |
-| Interpretability | low (sensitivity analysis needed) | medium (feature importances) | high (coefficients) | high (physics) |
-| Learns from real outcomes | yes | yes | yes | no |
+| Interpretability | low (needs sensitivity analysis) | medium | high | high (physics) |
 
-* **Logistic regression** is fast and interpretable but cannot represent
-  interactions; for example, battery charge matters far more on a long
-  straight than into a corner. Its error is 15.7 points.
-* **Gradient-boosted trees** are the strongest standard method for tabular
-  data and train 48× faster than the network, but are
-  1.9× less accurate here, less well calibrated, and larger. Their
-  piecewise-constant predictions approximate the smooth physics less well.
-* **Direct simulation** is exact by construction and 23× slower per
-  prediction, but it needs the physical model to be right; it cannot learn
-  from observed race outcomes. The network is the method that transfers to
-  real data.
-
-The neural network was selected because it is the most accurate of the
-learnable methods (half the error of gradient boosting) and as well calibrated
-as the best of them, at an acceptable cost.
+Logistic regression cannot represent interactions, so its error is largest
+where they dominate (straights, wet tracks, unsuited tyres). Gradient boosting
+trains 24 times faster but is 1.9 times less accurate, worse in every region
+and less well calibrated: piecewise-constant trees approximate smooth physics
+poorly. Neither baseline was handicapped: of nine gradient-boosting settings
+the one used (up to 500 trees with early stopping, learning rate 0.1,
+31 leaves) was best on validation data (3.7 points, others up to 4.2), and
+logistic regression is insensitive to its penalty (15.5 points for
+C = 0.1-10). Direct simulation is exact but 20 times slower, and can use real
+data only by fitting its few outcome constants to aggregate pass rates; the
+network needs attempts with all 19 inputs. The network is the most accurate
+fast surrogate, and its 208 s of training pays for itself after about
+0.9 million predictions.
 
 ## 5. Validation
 
+Three questions were asked, each against a reference able to answer it: are
+the equations solved correctly (5.1, exact solutions and theory), does the
+network reproduce the simulator (5.2, withheld data), and is the simulator
+realistic (5.3, real races)?
+
 ### 5.1 Verification of the numerical methods
 
-| What | How | Acceptance | Result | Command |
-|---|---|---|---|---|
-| RHS + integrators | Special cases with analytical solutions: constant power without drag, `v² = v0² + 2Pt/m`; drag without power, `v = v0/(1 + k v0 t/m)` | relative error < 10⁻⁸ at dt = 0.05 s | passes | `pytest tests/test_physics.py` |
-| Order of accuracy | Slope of log error against log dt | Euler 1, RK4 4 (±0.15) | Euler 0.95 and 1.00; RK4 4.05 and 4.00 | `experiments solver` |
-| Full model step size | Deficit against dt = 0.001 s reference, 2,000 random scenarios | max error < 1 ms | 5.9e-05 s at dt = 0.05 s | `experiments timestep` |
-| Physical constraints and expected behaviour | Energy used ≤ energy available; speeds between 20 m/s and the cut-off speed; P(overtake) moves in the expected direction for 10 inputs; slicks in the wet nearly hopeless | always | passes | `pytest tests/` |
-| Quadrature | Against SciPy adaptive `quad` | < 10⁻¹⁰ | passes | `pytest tests/test_simulator.py` |
-| Outcome sampling | Monte Carlo (20,000 replays) against exact P, 50 scenarios | within 4.5 standard errors | passes | same |
+*Table 5. Verification checks, each with its acceptance criterion.*
 
-![Solver convergence](../reports/figures/solver_convergence.png)
+| Check | Method | Acceptance | Result |
+|---|---|---|---|
+| Right-hand side, integrators, crossing | Exact solutions: constant power, $v^2 = v_0^2 + 2Pt/m$; drag only, $v = v_0/(1 + kv_0t/m)$ | relative error < 10⁻⁸ at 0.05 s | met |
+| Order of accuracy | Slope of log error against log step (Figure A3) | Euler 1, RK4 4, each ± 0.15 | Euler 0.95, 1.00; RK4 4.05, 4.00 |
+| Step size, full model | Deficit against a 0.001 s reference, 2,000 scenarios | worst error < 1 ms (0.5 % of $\sigma$) | 0.059 ms; order 2.0 (kinks in the right-hand side) |
+| Stability | Battery-depletion ramp, steps 0.025-0.3 s | energy used ≤ available | met at 0.05 s; broken from 0.125 s |
+| Physical constraints | Energy budget, speed bounds; direction of 10 input effects | always | met |
+| Quadrature; crossing | SciPy's adaptive `quad`; Newton residual | < 10⁻¹⁰; < 10⁻⁹ m | met |
+| Outcome sampling | 20,000 Monte Carlo replays, 50 scenarios | within 4.5 standard errors | met |
 
-![Quadrature and Monte Carlo](../reports/figures/quadrature_study.png)
+**Error budget.** Time stepping dominates: at most 0.059 ms in the deficit,
+which moves $P$ by at most 0.012 points since $|dP/dD| \le 1/(\sigma\sqrt{2\pi}) = 2.0$ s⁻¹;
+quadrature (10⁻¹⁵) is negligible and the modelling error of Section 5.3 far
+larger. The part most vulnerable to numerical failure is the battery ramp:
+from 0.125 s RK4 spends energy the car does not have. The fixed step (margin
+2.5) and an energy-budget test guard against it; integrating the energy
+equation exponentially would remove the limit.
 
-### 5.2 Validation of the network
+### 5.2 Validation of the network against the exact probability
 
-**Design.** The network never sees the true probability: it is trained on 0/1
-outcomes, as it would be with race data. The validation set (30,000 attempts)
-was used for early stopping and to choose the architecture; the test set
-(30,000) was used once, for the numbers here. Because the simulator provides
-the exact probability of every test scenario, the main metric is the **mean
-absolute error against the true probability** (in percentage points). Log
-loss, Brier score, ROC AUC and calibration error, which need only outcomes and
-would also be available with real data, are reported alongside.
+**Design.** The network learns from 0/1 outcomes and never sees the exact
+probability. The validation set served early stopping and every modelling
+choice; the test set only final comparisons. The main metric is the **mean
+absolute error against the exact probability**, in percentage points;
+outcome-only metrics that real data would also allow (log loss, calibration
+error, ROC AUC) are reported alongside, with the exact probability's own log
+loss (0.252) as the floor no model can beat.
 
-**Results.** Mean error 2.0 points; median 0.7, 90th percentile
-5.6, 99th percentile 15.6, worst 58.7. Calibration error
-0.005: predicted probabilities match observed frequencies.
+**Results.** The mean error is 2.0 points (median 0.7, 90th percentile 5.6,
+99th 15.6), lower than gradient boosting in every region, with a log loss
+0.004 above the floor. For the comparisons a strategist makes, the *change*
+in probability is right to 2.1 points when Boost is switched (true change
+10.0 on average) and 1.3 points for 20 points less charge (true 4.0); gradient
+boosting 3.5 and 1.8. The network follows the main what-if curves (Figure 2),
+including the drop when Overtake Mode is lost above 1 s.
 
-![Calibration](../reports/figures/calibration.png)
+<img src="../reports/figures/what_if.png" alt="What-if curves" width="85%">
 
-**Regions.** Error is checked by operating region, because a single average
-can hide a poor region:
+*Figure 2. Network (solid) against the exact probability (dashed) for the
+default scenario, varying the gap and battery (left) and the straight's length
+(right).*
 
-![Error by region](../reports/figures/method_comparison.png)
+**Failure modes.** (i) *Rare combinations*: with tyres unsuited to the
+surface (slicks when wet, treaded tyres when dry) the error is 2.6 points
+against 1.9; such attempts are 18 % of the test set but half of the worst 1 %.
+(ii) *Along the battery axis*: 3.5 points low at a full battery in the default
+scenario (44 % against 47 %), 10.5 low in the wet, and 7.4 high at 37.5 %,
+where the exact curve is steepest; ensembling cannot remove this and a
+physics-informed input only moved it (Appendix B). (iii) *Extrapolation*: on
+straights longer than any in training the error rises to 4.4 points, hence
+the out-of-range warning.
 
-**Failure modes.**
+### 5.3 Validation of the simulator against real 2026 races
 
-* *Rare combinations.* Error is higher where either car's tyres do not suit
-  the surface (slicks in the wet, wet-weather tyres in the dry): 2.6 points
-  against 1.9 elsewhere. Such cases are 18 % of the test set but 50 % of the
-  worst 1 % of errors and 70 % of the worst 0.1 %. They are rare in the
-  training data, as in racing.
-* *Bias near a full battery, and run-to-run variation.* Sensitivity analysis
-  showed the first single network 6 points low at the default scenario
-  (41 % against 47 %), the error growing as the attacker's battery rose above
-  80 %. Three explanations were tested in turn:
-  1. *Too little training data at a full battery*, which was the edge of a
-     uniform 0-100 % distribution. Making 15 % of training attempts start full
-     (realistic, so kept) did not reduce the error: rejected.
-  2. *The network smooths a sharp corner.* Along the battery axis the true
-     probability rises steeply and then stops abruptly at about 60 %, where
-     the battery first covers the straight. Two physics-informed inputs
-     (`features.DERIVED`: each car's battery energy divided by the energy
-     needed for full power along the straight, capped at 1) were added to hand
-     the network that corner.
-  3. *Run-to-run variation.* Retraining with a different random seed moves a
-     single network's prediction at any one scenario by several points.
+The simulator was compared with 17 races of 2026 in OpenF1 [15]
+(`overtake/realdata.py`). No public source records battery charge or Boost
+use, so the comparison is indirect. Of 4,289 recorded position changes,
+removing lap 1 (962), safety-car, red-flag and Overtake-Mode-disabled periods
+(852) and pit stops (1,253) leaves **1,222 on-track passes**, checked by
+tracing passes back to the raw data (Appendix C).
 
-  Explanations 2 and 3 were tested together, five seeds each
-  (`experiments ablation`, validation set):
+* **Speed limit.** In 19,588 race laps the fastest speed-trap reading exceeds
+  355 km/h on only 2 (358 km/h), supporting the power taper.
+* **Acceleration.** On 135 full-throttle stretches of one car at Monza, the
+  car model fits best with the standard energy map (115 stretches; median RMS
+  error 9.9 km/h, 21.2 with Boost). On the longest straight the real car peaks
+  at 317 km/h and slows to 302 km/h before braking; the model does not.
+* **Pass rate against gap** (Figure 3). The real chance falls much faster
+  with the gap: at 0.75-1 s it is a fifth of its 0.25-0.5 s value, against
+  two thirds in the simulator, then levels off at 2-5 % per lap beyond 1 s.
+* **Circuits.** The simulator's circuit passability ranks real passes per lap
+  with Spearman correlation 0.65 (p = 0.006, 16 circuits; 0.58 without
+  Monaco).
 
-  | | Mean error vs truth (points) | Log loss | Error at default scenario (points) | Worst error along battery axis (points) |
-  |---|---|---|---|---|
-  | Raw inputs, single network (mean ± sd) | 2.24 ± 0.06 | 0.2595 ± 0.0004 | -3.5 ± 2.5 | 7.8 ± 2.0 |
-  | Raw inputs, ensemble of 5 | 2.02 | 0.2585 | -3.5 | 7.4 |
-  | Energy-cover inputs, single network (mean ± sd) | 2.18 ± 0.04 | 0.2589 ± 0.0004 | +0.3 ± 2.5 | 12.6 ± 4.3 |
-  | Energy-cover inputs, ensemble of 5 | 1.97 | 0.2580 | +0.3 | 12.6 |
+<img src="../reports/figures/real_gap.png" alt="Pass rate against gap" width="85%">
 
-  The seed alone moves the default-scenario error by about ±2.5
-  points, so the first network's -6 points was partly bad luck: one training
-  run is not enough to judge a change. Ensembling cut the mean error by about
-  10 % with either inputs by averaging out run-to-run variation, but it
-  cannot remove a bias that all runs share. The energy-cover inputs removed the
-  bias at the default scenario but made the worst error along the battery axis
-  larger: their energy estimate ignores the power taper above 290 km/h, so it
-  puts the corner at about 75 % battery where the true corner is near 60 %.
-  Their log-loss gain (0.0005) is well within one standard error of the
-  validation log loss (about 0.003), so by the same rule as Section 6.3 the
-  simpler model was kept: **raw inputs, ensemble of five networks**. Its
-  remaining error at the default scenario is -3.5 points.
+*Figure 3. Pass rate against the gap at the start of the lap: shape compared
+with the simulator (left, both relative to 0.25-0.5 s) and real rates with
+95 % Wilson intervals (right).*
 
-  The same bias is larger on a wet track. With intermediates on both cars and
-  the other inputs at their defaults, the ensemble is 5 points low at a 40 %
-  attacker battery and 10.5 points low at 100 % (20 % against 30 %;
-  `experiments sensitivity`). Across all 1,569 wet straights on treaded tyres
-  in the test set the error averages 2.8 points with no overall bias, so the
-  problem is local to high battery charge; wet attempts are about an eighth
-  of the training data, which leaves this region thinly covered.
-* *Extrapolation.* On straights of 1300-2000 m, longer than any in training,
-  mean error rises to 4.4 points (gradient boosting 9.7,
-  logistic regression 26.9). The prediction tool warns when an input
-  is outside the training range.
+The physics is plausible, but the outcome model is too optimistic at 0.5-1 s:
+it gives the attacker more energy for one straight than real drivers spend.
 
-**Sensitivities.** The network's response to each input agrees with the
-simulator's in direction and closely in size (Section 6.5), so it has
-learned the mechanisms, not just the average.
+### 5.4 Sensitivity and engineering interpretation
 
-### 5.3 What the validation cannot establish
+Varying one input at a time (Figure A9), the network moves the same way as
+the simulator for every input; the gap, the straight's length, both batteries
+and Boost matter most. Of the estimated constants (Figure A10), the
+corner-exit speed matters most: 10 % slower or faster moves the default
+scenario from 47 % to 55 % or 40 %, because it sets how long both cars are
+traction-limited. The two Overtake Mode levers help different attackers
+(Figure A11): the extra energy matters only when the battery cannot cover the
+straight (at 30 % charge, 0 to 1 MJ takes P from 0.1 % to 27 %; at 100 % it
+changes nothing), while the later taper start helps whenever energy is
+plentiful (18 % if power tapered from 290 km/h, 47 % at 337 km/h).
 
-The validation shows that the numerical methods are implemented correctly and
-that the network reproduces the simulator. It does **not** show that the
-simulator matches real 2026 racing. Parameters marked as estimates, the
-execution-noise model and the circuit factors have not been fitted to real
-overtakes, and the plausibility checks in Section 3.2 are coarse. A direct
-test would need labelled real attempts with battery and Boost data, which are
-not public. Section 5.4 tests the simulator indirectly against the public data
-that do exist.
+### 5.5 Influence on model selection, and what validation cannot establish
 
-### 5.4 Comparison with real 2026 races
-
-`python -m overtake.experiments real` (`overtake/realdata.py`; results in
-`reports/results/real_data.json`). The first run downloads the data (about 4
-minutes); later runs read a local cache and take under a minute.
-
-**Data.** [OpenF1](https://openf1.org) is a free, unofficial API of Formula 1
-timing data. Of the sources checked (Kaggle datasets, FastF1, TracingInsights,
-OpenF1), it was chosen because it has the 2026 season with position changes,
-gaps, race-control messages and telemetry behind one web API. It gives, for
-every race: lap start times and speed-trap speeds for every car; the gap to the
-car ahead about every 4 s; pit stops; race-control messages (safety cars, red
-flags, Overtake Mode enabled or disabled); position changes between cars (a
-beta "overtakes" feed); and, for single cars, speed, throttle and brake at
-about 3.7 Hz. It does
-**not** record battery charge or Boost and Overtake Mode use, so no real attempt
-can be labelled with all 19 inputs. 19 races were run before 19 October 2026;
-OpenF1 has no data for two (Sakhir, Jeddah), leaving **17 races**. The cut-off
-date is fixed in the code so the results do not change as later races are run.
-
-**Step 1: from position changes to overtakes.** OpenF1 records 4,289
-position changes. Each is given the first reason that applies:
-
-| Reason | Rule | Position changes |
-|---|---|---:|
-| Start | lap 1 (standing start) | 962 |
-| Neutralised | during a safety car, virtual safety car or red flag, or while race control had disabled Overtake Mode | 852 |
-| Pit stop | either car pitted on that lap or the lap before, or is on its pit-out lap | 1,253 |
-| **On track** | everything else | **1,222** (28 %) |
-
-Neutralised periods come from race-control messages: a period starts with
-OVERTAKE DISABLED, SAFETY CAR DEPLOYED, VSC DEPLOYED or RED FLAG and ends with
-OVERTAKE ENABLED (or TRACK CLEAR for a safety car). Both kinds of message are
-needed, because race control does not announce every safety car with
-OVERTAKE DISABLED. The first version of the filter had no such rule; checking
-individual passes against the raw rows showed why it was needed (at Monza a
-"pass" on lap 6 was made behind the safety car after a red flag, on a 148 s
-lap against a normal 88 s). Passes on cars slowing with a problem cannot be
-identified from the data and remain.
-
-**Step 2: speeds and the 2026 electrical-power limit.** The rules cut MGU-K
-power to zero at 355 km/h (Section 1). Over 19,588 race laps the highest
-speed-trap reading per lap exceeds 355 km/h on 2 laps (0.2 % of laps at
-Catalunya, maximum 358 km/h, plausibly in a slipstream); everywhere else the
-maximum is 287-353 km/h. This supports the taper the simulator uses.
-
-![Speed traps](../reports/figures/real_speed_traps.png)
-
-**Step 3: the car model against telemetry.** One car's telemetry from the
-Monza race (car 81) was split into full-throttle stretches (throttle ≥ 99 %,
-no brake, at least 6 s, gaining at least 80 km/h): 135 straights, median
-884 m, distance from the trapezoidal integral of speed. For each, the RK4 car
-model of Section 3.2 was started at the same speed and run for the same time
-with full Boost, the standard energy map, and no electrical power.
-
-| Model variant | Best fit (of 135 straights) | Median RMS speed error |
-|---|---:|---:|
-| Standard map (55 % deployment) | 115 | 9.9 km/h |
-| No electrical power | 18 | 23.4 km/h |
-| Full Boost | 2 | 21.2 km/h |
-
-The physics reproduces real acceleration to within about 10 km/h when the
-deployment matches what drivers actually use. On the longest straight
-(1,250 m, 15 s) the real car accelerates from 226 to a peak of 317 km/h and
-then *loses* speed to 302 km/h before braking: the battery runs out or is
-deliberately saved (energy is rationed over a lap). The model, which spends
-energy on each straight without thinking about the next one, ends at 324
-(standard map) or 332 km/h (Boost).
-
-![Telemetry](../reports/figures/real_telemetry.png)
-
-**Step 4: pass rate against gap.** For every driver-lap (14,942 after
-removing lap 1, pit laps, neutralised laps, the leader and lapped cars) the
-gap to the car ahead at the start of the lap was taken from the nearest
-interval reading (within 10 s), and the lap counts as a pass if that driver
-made an on-track pass before the next lap began (945 laps). Rates are shown with 95 % Wilson score intervals,
-which unlike the normal approximation stay inside [0, 1] for small counts.
-
-| Gap at lap start | Driver-laps | Real pass rate per lap | Relative to 0.25-0.5 s | Simulator, relative |
-|---|---:|---:|---:|---:|
-| 0-0.25 s | 233 | 63 % (56-69) | 1.77 | 1.16 |
-| 0.25-0.5 s | 801 | 35 % (32-39) | 1.00 | 1.00 |
-| 0.5-0.75 s | 1,250 | 16 % (14-18) | 0.45 | 0.82 |
-| 0.75-1 s | 1,061 | 6.9 % (5.5-8.6) | 0.19 | 0.65 |
-| 1-1.25 s | 841 | 3.6 % (2.5-5.0) | 0.10 | 0.48 |
-| 1.25-1.5 s | 705 | 4.5 % (3.2-6.3) | 0.13 | 0.37 |
-| 1.5-2 s | 1,078 | 3.2 % (2.3-4.5) | 0.09 | 0.27 |
-| 2-3 s | 1,532 | 2.3 % (1.7-3.2) | 0.07 | outside simulated range |
-
-The real rate is per lap and the simulator's is per attempt, and the
-simulator's average is over its own mix of scenarios, so their levels are not
-comparable; their *shapes* are, so both are divided by their value at
-0.25-0.5 s. The real chance falls much faster: at 0.75-1 s it is a fifth of
-its 0.25-0.5 s value, against two thirds in the simulator. Beyond 1 s it levels
-off at 2-5 % per lap instead of continuing to fall. There is no sharp step at
-the 1 s Overtake Mode threshold in the real data, but a step would be blurred
-here because the gap is measured at the start of the lap, not at the
-detection point. The simulator therefore makes passes from 0.5-1 s too easy,
-consistent with Step 3: real drivers do not have the full battery for every
-straight that the scenarios assume. The floor beyond 1 s is passes the
-simulator does not model (gaps closed during the lap, mistakes, cars with
-problems).
-
-![Pass rate and gap](../reports/figures/real_gap.png)
-
-**Step 5: circuits.** On-track passes per race lap range from 0.27 (Monaco)
-to 3.25 (Monza). Ranked against the simulator's estimated circuit
-passability (Section 3.4; Kuala Lumpur has no value), the Spearman rank
-correlation is **0.65** (p = 0.006, 16 circuits); without Monaco, which is
-extreme on both scales, 0.58 (p = 0.023). A rank correlation was used because
-the two quantities are on different scales and only their order is
-comparable. The largest disagreements are Suzuka (second most passes,
-below-average passability in the model) and Madrid (few passes, average
-passability).
-
-![Circuits](../reports/figures/real_circuits.png)
-
-**What this shows.** The physics is plausible: real speeds respect the 355 km/h
-limit and real acceleration matches the car model within about 10 km/h. The
-circuit factors are right in order to a moderate degree. The probability model is too
-optimistic between 0.5 and 1 s, because it lets the attacker use more energy on
-one straight than drivers in 2026 actually do. Without battery data this
-comparison cannot calibrate the simulator; it shows which assumption to fix
-first (energy management across the lap).
-
-**Limitations of the comparison.** No battery or Boost data, so the inputs of
-real attempts are unknown; OpenF1's overtakes feed is a beta and is filtered
-heuristically; the per-lap pass rate includes passes not made on the main
-straight; the telemetry is one car at one circuit.
+The convergence study exposed a modelling error and, with the stability
+study, set the step; validation log loss with the one-standard-error rule
+[14] chose the network size; five-seed comparisons chose the ensemble and
+rejected physics-informed inputs; real data was kept out of tuning.
+Validation cannot establish that the estimated constants are right for real
+cars, or the network's accuracy on real attempts; it is calibrated against
+the simulator, on test data from the same sampler as its training data.
 
 ## 6. Optimisation and performance
 
-### 6.1 Time step
+The aim was the cheapest step and implementation accurate by a wide margin,
+and the smallest network that accuracy allows (Table 6). Times are wall-clock
+(`time.perf_counter`, best of three) on a 16-thread Intel laptop CPU on
+battery, PyTorch using 12 threads; training was timed on a 4-core cloud
+machine. Absolute laptop times vary between runs; the ratios carry over.
 
-![Time-step study](../reports/figures/timestep_study.png)
+*Table 6. Baseline against selected solution.*
 
-The first time-step study showed the worst-case error of RK4 shrinking only in
-proportion to dt (first order), 1.1 ms at dt = 0.05 s, above the 1 ms limit.
-The cause was the slipstream switching off instantly when the attacker drew
-alongside, a jump in drag that RK4 cannot integrate at fourth order. Making the
-slipstream fade over one car length (also more realistic) cut the worst error
-at dt = 0.05 s by more than an order of magnitude: to 0.043 ms on the same
-2,000 scenarios, and 5.9e-05 s (0.059 ms) on the final scenario sample (results
-before the fix: `reports/results/timestep_before_slipstream_fix.json`). The remaining kinks
-(traction limit, power taper, battery running out) keep the observed order
-around 2.7 rather than 4. dt = 0.05 s was chosen: its error is
-3,402 times smaller than the 0.2 s execution noise, and halving it
-doubles the cost for no meaningful gain.
-
-### 6.2 Where the time goes
-
-Profiling (`cProfile`, 20,000 attempts) shows the force evaluation
-(`acceleration`, 26 % of run time), the RK4 bookkeeping and the power
-taper dominate; the network and data handling are negligible.
-
-| Change | Before | After | Gain |
+| Change | Baseline | Selected | Effect |
 |---|---|---|---|
-| Integrate scenarios together instead of one at a time (200 scenarios) | 10.8 s | 0.23 s | 47× |
-| Chunk of 20,000 instead of 1,000 (40,000 attempts) | 14.0 s | 3.1 s | 4.5×; 40,000 gains only 3 % more and needs twice the memory |
-| Gauss-Legendre instead of Monte Carlo (1,600 replays) for the exact P | 90 µs | 0.48 µs per scenario | 189×, and exact |
+| Slipstream: instant switch-off, then fading over a car length | RK4 first order; 1.1 ms worst error at 0.05 s | 0.043 ms, same scenarios | 25 times more accurate |
+| Time step (2,000 scenarios; Figures A4, A5) | 0.1 s: 0.58 s, 0.27 ms; only 1.25 times inside the battery overdraw | 0.05 s: 1.11 s, 0.059 ms | twice the cost buys a stability margin of 2.5 |
+| Loop over scenarios, then vectorised (200 scenarios) | 24.6 s | 0.54 s | 45 times faster; with chunking 1,160 times (123 ms to 106 µs per scenario) |
+| Chunk size (40,000 scenarios) | 1,000: 22.2 s | 20,000: 4.2 s | 5.2 times faster; 40,000 is slower and needs twice the memory |
+| Exact $P$: Monte Carlo (1,600 replays), then Gauss-Legendre | 205 µs, 0.7-point error | 1.2 µs, exact | 167 times faster |
+| Single network, then ensemble of five | 2.24 ± 0.06 points | 2.02 points | 10 % lower error, 5 times the cost |
+| Network size: lowest loss (128-128-64), then one-standard-error rule (64-64) | 59,649 FLOPs | 13,313 FLOPs | 4.5 times cheaper, loss within one standard error |
 
-### 6.3 Network size and data requirements
+**Profiling** (cProfile, generating 20,000 attempts) puts 97 % of the run
+time in the ODE integration: force evaluation 22 %, NumPy's clipping 12 %,
+the integration loop 12 %, RK4 step 11 %, slipstream 10 %; sampling, outcome
+model and quadrature take 3 %. Training dominates the whole pipeline: one
+epoch of one network takes 6.8 s (the first network ran 53), against 33 s
+to simulate all 300,000 attempts.
 
-![Model selection](../reports/figures/model_selection.png)
+**FLOPs and arithmetic intensity.** One ensemble prediction costs 66,565
+FLOPs (from the layer sizes) and one simulation about 68,600 (153 RK4 steps of
+about 444 hand-counted FLOPs, plus the quadrature), yet the network's forward
+pass is about 58 times faster (2.2 against 130 µs; with input checks, 20 times,
+Table 4). The difference is mostly arithmetic intensity: dense matrix products
+reuse each weight for every scenario in a batch, so intensity rises from 0.5
+FLOP/byte for one prediction (memory-bound) to 446 at a batch of 10,000, where
+the ensemble runs at 30 GFLOP/s (compute-bound). The simulator's element-wise
+float64 operations move about 24 bytes per FLOP, so its 0.5 GFLOP/s is limited
+by memory traffic; PyTorch also uses all threads, NumPy's element-wise
+operations one. Memory is modest: 132 kB for the ensemble, a peak of 12 MB per
+20,000-scenario chunk (tracemalloc) and 115 MB for the dataset; chunking caps
+the simulator's memory.
 
-| Hidden layers | Parameters | FLOPs per prediction | Validation log loss ± standard error | Validation error (points) |
-|---|---|---|---|---|
-| 32 | 1,309 | 2,369 | 0.2671 ± 0.0029 | 3.4 |
-| 64-64 (selected) | 6,589 | 13,313 | 0.2594 ± 0.0029 | 2.2 |
-| 128-128-64 | 29,373 | 59,649 | 0.2591 ± 0.0029 | 2.3 |
-| 256-256-128 | 107,709 | 217,601 | 0.2606 ± 0.0030 | 2.6 |
-
-Selection used validation log loss, the metric that would also be
-available with real data; it ranks the networks the same way as the error
-against truth. The lowest validation log loss was 128-128-64 (0.2591); 64-64 (0.2594) is within one standard error (0.0029) and needs 4.5× fewer FLOPs, so the one-standard-error rule [14] selects it. This rule was adopted after two runs on different data ranked 64-64 and 128-128-64 in opposite orders by less than 0.001: picking the raw minimum would have chosen on noise (first-run results: `reports/results/selection_before_battery_sampling.json`, `selection_min_rule.json`). Training-set size matters more than network size: the error
-falls from 6.8 points with 10,000 attempts to 2.2 with 240,000 and
-is still falling. One F1 season produces perhaps a thousand overtaking
-attempts (a rough estimate), so a network trained only on real data would be data-starved; the
-practical route is to pre-train on simulation and fine-tune on real attempts.
-
-### 6.4 FLOPs, arithmetic intensity and memory
-
-| | Ensemble (5 × 64-64) | Direct simulation |
-|---|---|---|
-| FLOPs per prediction | 66,565 (counted from layer sizes) | ~68,602 (153 RK4 steps × ~444 FLOPs, hand-counted) |
-| Achieved rate | 81 GFLOP/s (batch matrix products) | 0.7 GFLOP/s |
-| Time per prediction | 0.82 µs (forward passes only) | 95 µs |
-
-The five-network ensemble needs about as many operations as the simulation
-but runs them 118× faster. The difference is arithmetic intensity.
-The network's work is dense matrix products: each weight read from memory is
-used for every prediction in the batch, so intensity grows from 0.5
-FLOP/byte for a single prediction (memory-bound) to 251 at a batch of
-1024 (compute-bound, using the CPU's vector units). The simulation performs
-many small element-wise NumPy operations, each reading and writing whole
-arrays for a few FLOPs, so its intensity is well below 1 FLOP/byte and it is
-memory- and overhead-bound. Memory: ensemble 132 kB; the 300,000
-attempt dataset 115 MB; ODE state 0.96 MB per chunk.
-
-### 6.5 Sensitivity
-
-![Sensitivity](../reports/figures/sensitivity.png)
-
-One input at a time between plausible extremes around the default scenario
-(`experiments sensitivity`). The gap, straight length and the two batteries
-matter most, followed by Boost, tyre age and the circuit; driver ratings and
-track temperature matter least. The network (bars) and the simulator (ticks)
-agree in direction for every input; across the 30 settings the median
-difference is 2 points, 87 % are within 5 points, and the largest is 6.5
-points (part of it is the 3.5-point bias at the default scenario).
-One-at-a-time analysis misses interactions; the what-if curves below
-show two important ones: the drop when Overtake Mode is lost above 1 s, and
-how Boost's value grows with straight length.
-
-![What-if curves](../reports/figures/what_if.png)
+**Data requirements.** The error falls from 6.8 points with 10,000 training
+attempts to 2.2 with 240,000 and is still falling, while a larger network does
+not help (Table A1): data, not size, limits accuracy.
 
 ## 7. Limitations and lessons learned
 
-**Limitations.** The model's realism is limited by the simulator: estimated
-parameters, a single-straight scope, a simple driver model, and no real
-labelled attempts. Compared with real 2026 races (Section 5.4) the chance of
-passing from 0.5-1 s behind is too high, because the simulator gives the
-attacker more energy per straight than drivers actually use. The network is accurate on average but less so for rare
-combinations, outside its training range, and near a full attacker battery,
-where it under-predicts by about 3.5 points in the dry and up to about 10
-points in the wet.
+**Limitations.** The model is only as realistic as the simulator (estimated
+constants, one straight, a simple driver model, no labelled real attempts),
+and real races show it too optimistic from 0.5-1 s behind. The network is
+less accurate for rare combinations, beyond its training range and along the
+battery axis.
 
 **Lessons.**
 
-1. *Convergence studies find modelling errors, not just numerical ones.* The
-   first-order convergence of RK4 exposed a discontinuity in the slipstream
-   model that a quick visual check would never have shown.
-2. *Sensitivity analysis is a validation tool, and hypotheses must be
-   tested.* The comparison with the simulator's sensitivities exposed an
-   error at the most common operating point. The obvious explanation (too
-   little data at a full battery) was wrong. A physics-informed input looked
-   like a fix in one training run, but repeated runs showed it moved the error
-   rather than removing it, because its physics was too approximate.
-3. *One training run is not evidence.* The random seed alone moves a single
-   network's prediction by several points. Comparisons were therefore repeated
-   over five seeds, and the final model averages five networks.
-4. *A known ground truth makes model comparison decisive.* Outcome-only
-   metrics (log loss) ranked the models the same way as error against truth,
-   which gives some confidence they would also guide selection on real data.
-5. *Data, not network size, limits accuracy.* Doubling the network did not
-   help; more data did.
-6. *Verification is not validation.* Every numerical check passed, yet real
-   races show the simulator's gap curve is too flat: the equations were solved
-   correctly but one assumption (a full battery for every attack) is wrong.
-   Indirect real data (speeds, gaps, position changes) was enough to find this
-   even without battery data. Filtering the raw data mattered as much as the
-   model: 72 % of OpenF1's "overtakes" were the start, pit stops or
-   neutralised periods, and the safety-car rule was found only by checking
-   individual passes against the raw rows.
+1. *Convergence studies find modelling errors*: RK4 converging at first
+   order exposed a discontinuity in the slipstream model.
+2. *Stability is set by the fastest process*: speed changes over seconds, but
+   the battery ramp decays in 0.06 s and sets the step limit.
+3. *One training run is not evidence*: the seed alone moves a single network's
+   prediction by several points, so comparisons used five seeds.
+4. *Hypotheses must be tested*: the obvious cause of the full-battery bias was
+   wrong, and a fix that worked in one run moved the error in five.
+5. *Verification is not validation*: every numerical check passed, yet real
+   races showed one assumption (a full battery per attack) to be wrong.
 
-**Improvements.** Model energy management across a lap (the main
-discrepancy found in Section 5.4), then fit the execution noise and circuit
-factors to the real pass-rate curve and per-circuit pass counts; extend to a
-full lap with energy strategy;
-use event location so RK4 keeps fourth order through the kinks; fine-tune the
-network on real labelled attempts.
+**Improvements.** Model energy management across the lap; fit the execution
+noise and circuit factors to real pass rates; fine-tune a network pre-trained
+on simulation if energy data appear (untested).
 
-## 8. AI use
+## 8. AI use and reflection
 
-### Disclosure (factual record)
+### Disclosure
 
-Claude Code (Anthropic) was used throughout, in a cloud development session.
+Claude Code (Anthropic) was used throughout, first in a cloud session and
+then in a local one.
 
 | Task | What the AI did | How it was checked |
 |---|---|---|
-| Rules research | Web searches on the 2026 power-unit, Boost and Overtake Mode rules; flagged conflicting reports (taper end points) | Sources listed in References |
-| First version | Wrote a first simulator with hand-tuned formulas and the network | Replaced after reading the project brief: it had no numerical method that could be verified |
-| Physics model and numerics | Wrote the two-car ODE model, RK4/Euler, Hermite crossing, quadrature | Analytical-solution tests, convergence studies, Monte Carlo agreement |
-| Calibration | Proposed the estimated constants and tuned them for plausibility | Speed traces and representative scenarios checked; constants marked as estimates |
-| Network, baselines, experiments, figures, tests, docs | Wrote the code and this documentation draft | 66 automated tests; all numbers regenerated by the code |
-| Real-data comparison | Searched for public 2026 data (Kaggle, FastF1, OpenF1); wrote the download, filtering and comparison code | Filters tested on hand-made races; individual passes checked against the raw OpenF1 rows |
+| Rules research | Summarised the 2026 rules; flagged conflicting reports | Sources in the references |
+| Physics, numerics, network, experiments | Wrote the code, figures and tests | 84 tests; exact-solution, convergence and stability studies; numbers regenerated by code |
+| Real-data comparison | Found OpenF1; wrote download, filters, comparison | Filters tested on hand-made races; passes traced to raw data |
+| Review | Audited the project against the brief | Each finding re-checked by a second agent and by running code |
+| Documentation, presentation | Drafted this report, slides and notes | Checked against the results files |
 
-Errors made by the AI and caught during the work: a first simulator too crude
-for the unit's requirements; a slipstream discontinuity (found by the
-time-step study); two wrong diagnoses of the network's error at a full
-battery (a data gap, then a physics-informed input that one training run made
-look like a fix and five runs did not support); tests with wrong expectations
-(wet-track test using slick tyres; Euler order measured at too large a step);
-a crash on text input in the prediction tool; a first real-data filter that
-counted position changes behind the safety car as overtakes (found by checking
-individual passes against the raw data).
+AI errors caught: a simulator too crude for the unit, a slipstream
+discontinuity, a stability argument that missed the battery ramp, two wrong
+diagnoses of the full-battery bias, wrong test expectations, a filter
+counting safety-car position changes, and an unsourced wrong speed.
 
 ### Reflection
 
-*To be written by Sam: the brief asks for your own reflection, so this section
-is deliberately left for you.* The brief asks you to cover: which tools you
-used and for what; the approximate level of AI contribution; why you used AI
-for those tasks; how you checked the AI-generated material; which important
-decisions remained yours; errors, limitations or unhelpful suggestions; and
-how AI affected your understanding and workflow.
+*To be written by Sam in his own words (the brief requires a personal
+reflection). Cover: which tools were used and for what; the approximate level
+of AI contribution; why AI was used for those tasks; how AI-generated material
+was checked; which important decisions remained yours; errors, limitations or
+unhelpful suggestions from the AI; and how AI use affected your understanding
+and workflow.*
 
 ## References
 
@@ -734,7 +485,7 @@ how AI affected your understanding and workflow.
    <https://FIA.com/sites/default/files/fia_2026_formula_1_technical_regulations_pu_-_issue_4_-_2023-10-25.pdf>
 8. The Race, "Boost, overtake mode, active aero: key 2026 F1 terms explained".
    <https://www.the-race.com/formula-1/boost-overtake-mode-active-aero-recharge-key-2026-terms-explained>
-9. S. C. Chapra and R. P. Canale, *Numerical Methods for Engineers*, McGraw-Hill (Runge-Kutta methods, Gauss quadrature).
+9. S. C. Chapra and R. P. Canale, *Numerical Methods for Engineers*, McGraw-Hill (Runge-Kutta methods, stability, Gauss quadrature).
 10. I. Loshchilov and F. Hutter, "Decoupled weight decay regularization", ICLR 2019 (AdamW).
 11. C. Guo, G. Pleiss, Y. Sun and K. Q. Weinberger, "On calibration of modern neural networks", ICML 2017 (calibration error).
 12. F. Pedregosa et al., "Scikit-learn: machine learning in Python", JMLR 12, 2011.
@@ -742,3 +493,211 @@ how AI affected your understanding and workflow.
 14. T. Hastie, R. Tibshirani and J. Friedman, *The Elements of Statistical Learning*, 2nd ed., Springer, 2009, Section 7.10 (one-standard-error rule).
 15. OpenF1, free API of Formula 1 timing data. <https://openf1.org> (2026 races, accessed October 2026).
 16. E. B. Wilson, "Probable inference, the law of succession, and statistical inference", *Journal of the American Statistical Association* 22, 1927 (score interval).
+17. P. Virtanen et al., "SciPy 1.0: fundamental algorithms for scientific computing in Python", *Nature Methods* 17, 2020 (`solve_ivp`, `quad`).
+
+---
+
+## Appendix A. Supplementary figures
+
+![Error by region](../reports/figures/method_comparison.png)
+
+*Figure A1. Mean error against the exact probability by operating region
+(test set).*
+
+![Speed traces](../reports/figures/speed_trace.png)
+
+*Figure A2. Simulated speed and battery energy along an 800 m straight:
+default scenario (left) and a defender with only 30 % charge, who runs out of
+energy mid-straight (right).*
+
+![Solver convergence](../reports/figures/solver_convergence.png)
+
+*Figure A3. Convergence of Euler and RK4 against two exact solutions of the
+car model: dashed lines have slopes 1 and 4.*
+
+![Stability](../reports/figures/stability.png)
+
+*Figure A4. Energy used beyond the battery against time step on the
+battery-depletion ramp, with the stability limits predicted from each
+method's stability region (`experiments stability`). Euler overdraws once
+$\lambda\Delta t > 1$, where its amplification factor turns negative, before
+its stability limit.*
+
+![Time-step study](../reports/figures/timestep_study.png)
+
+*Figure A5. Worst deficit error against time step (left) and run time (right),
+full two-car model, with RK4 using straight-line crossing interpolation
+dashed; the chosen step is marked.*
+
+![Quadrature and Monte Carlo](../reports/figures/quadrature_study.png)
+
+*Figure A6. Quadrature rules and Monte Carlo against a 200-node reference.*
+
+![Calibration](../reports/figures/calibration.png)
+
+*Figure A7. Calibration of the three learned models on the test set.*
+
+![Model selection](../reports/figures/model_selection.png)
+
+*Figure A8. Network size (left) and training-set size (right), validation set.*
+
+*Table A1. Network sizes (validation set).*
+
+| Hidden layers | Parameters | FLOPs per prediction | Validation log loss ± standard error | Error against exact P (points) |
+|---|---|---|---|---|
+| 32 | 1,309 | 2,369 | 0.2671 ± 0.0029 | 3.4 |
+| 64-64 (selected) | 6,589 | 13,313 | 0.2594 ± 0.0029 | 2.2 |
+| 128-128-64 | 29,373 | 59,649 | 0.2591 ± 0.0029 | 2.3 |
+| 256-256-128 | 107,709 | 217,601 | 0.2606 ± 0.0030 | 2.6 |
+
+The one-standard-error rule was adopted after two runs on different data
+ranked 64-64 and 128-128-64 in opposite orders by less than 0.001: choosing
+the raw minimum would have chosen on noise.
+
+![Sensitivity](../reports/figures/sensitivity.png)
+
+*Figure A9. One-at-a-time sensitivity around the default scenario: network
+(bars) against the exact probability (ticks). Gap, straight length and the two
+batteries matter most; driver ratings and track temperature least.*
+
+![Estimated constants](../reports/figures/constants.png)
+
+*Figure A10. Mean change in the exact probability over 2,000 random scenarios
+when each estimated constant is 10 % lower or higher (`experiments
+constants`). Tyre friction and the rear-axle load share act only through
+their product, so their effects are equal.*
+
+![Overtake Mode rules](../reports/figures/rules.png)
+
+*Figure A11. Exact probability in the default scenario against the Overtake
+Mode extra energy (left) and the speed where electrical power starts to taper
+(right), at three attacker charge levels (`experiments rules`).*
+
+## Appendix B. The full-battery bias
+
+Sensitivity analysis showed the first single network 6 points low at the
+default scenario. Three explanations were tested in turn. (1) *Too little
+training data at a full battery*, the edge of a uniform 0-100 % distribution:
+making 15 % of training attempts start full (realistic, so kept) did not
+reduce the error. (2) *The network smooths a sharp corner*: along the battery
+axis the exact probability rises steeply and stops abruptly near 60 %, where
+the battery first covers the straight; two physics-informed inputs (each
+car's battery energy divided by the energy needed for full power along the
+straight, capped at 1) were added to hand the network that corner.
+(3) *Run-to-run variation* between training seeds. Explanations 2 and 3 were
+tested together over five seeds (`experiments ablation`, validation set):
+
+| | Mean error (points) | Log loss | Error at default scenario (points) | Worst error along battery axis (points) |
+|---|---|---|---|---|
+| Raw inputs, single network (mean ± sd) | 2.24 ± 0.06 | 0.2595 ± 0.0004 | -3.5 ± 2.5 | 7.8 ± 2.0 |
+| Raw inputs, ensemble of 5 | 2.02 | 0.2585 | -3.5 | 7.4 |
+| Energy-cover inputs, single network (mean ± sd) | 2.18 ± 0.04 | 0.2589 ± 0.0004 | +0.3 ± 2.5 | 12.6 ± 4.3 |
+| Energy-cover inputs, ensemble of 5 | 1.97 | 0.2580 | +0.3 | 12.6 |
+
+The seed alone moves the default-scenario error by about ±2.5 points, so the
+first network's -6 points was partly bad luck. Ensembling cut the mean error
+by about 10 % with either input set, but cannot remove a bias that all runs
+share. The energy-cover inputs removed the bias at the default scenario and
+lowered the log loss slightly but consistently (by 0.0005, in all five
+seeds), yet made the worst error along the battery axis larger (12.6 against
+7.4 points), because their energy estimate ignores the power taper above
+290 km/h and puts the corner at about 75 % instead of 60 %. A model that is
+better on average but wrong in the place a strategist most needs was not
+adopted: raw inputs, ensemble of five. On a wet track with intermediates the
+remaining bias grows to 10.5 points at a full battery (20 % against 30 %),
+although across the 1,569 wet straights in the test set on which both cars
+use intermediates or wets the error averages 2.8 points with no overall bias.
+
+## Appendix C. Real-data comparison details
+
+`python -m overtake.experiments real`; results in
+`reports/results/real_data.json`. Position changes are classified by the first
+rule that applies: *start* (lap 1, 962); *neutralised* (852): during a safety
+car, virtual safety car or red flag, or while race control had disabled
+Overtake Mode, taken from race-control messages; *pit stop* (1,253): either
+car pitted on that lap or the lap before, or is on its pit-out lap; *on track*
+(1,222, 28 %). Checking individual passes against the raw rows exposed the
+need for the neutralised rule: at Monza a "pass" on lap 6 was made behind the
+safety car after a red flag, on a 148 s lap against a normal 88 s. Filtering
+mattered as much as modelling: 72 % of recorded position changes were not
+on-track passes.
+
+*Table C1. Pass rate per lap against the gap at the start of the lap
+(7,501 driver-laps with a gap under 3 s, of 14,942 after removing lap 1, pit
+and neutralised laps; 95 % Wilson intervals [16]).*
+
+| Gap | Driver-laps | Real pass rate | Relative to 0.25-0.5 s | Simulator, relative |
+|---|---|---|---|---|
+| 0-0.25 s | 233 | 63 % (56-69) | 1.77 | 1.16 |
+| 0.25-0.5 s | 801 | 35 % (32-39) | 1.00 | 1.00 |
+| 0.5-0.75 s | 1,250 | 16 % (14-18) | 0.45 | 0.82 |
+| 0.75-1 s | 1,061 | 6.9 % (5.5-8.6) | 0.19 | 0.65 |
+| 1-1.25 s | 841 | 3.6 % (2.5-5.0) | 0.10 | 0.48 |
+| 1.25-1.5 s | 705 | 4.5 % (3.2-6.3) | 0.13 | 0.37 |
+| 1.5-2 s | 1,078 | 3.2 % (2.3-4.5) | 0.09 | 0.27 |
+| 2-3 s | 1,532 | 2.3 % (1.7-3.2) | 0.07 | outside simulated range |
+
+The rates are per lap for real races and per attempt for the simulator, over
+different mixes of situations, so only their shapes are compared. A sharp step
+at the 1 s threshold would be blurred in the real data, because the gap is
+measured at the start of the lap rather than at the detection point. The
+circuit comparison uses 16 of the 17 races: one race's circuit is not in the
+simulator's list.
+
+![Speed traps](../reports/figures/real_speed_traps.png)
+
+*Figure C1. Fastest speed-trap reading per lap, every 2026 race.*
+
+![Telemetry](../reports/figures/real_telemetry.png)
+
+*Figure C2. Real full-throttle speed against the RK4 car model: the longest
+straight at Monza (left) and the RMS error over all 135 straights (right).*
+
+![Circuits](../reports/figures/real_circuits.png)
+
+*Figure C3. Real on-track passes per lap against the simulator's circuit
+passability.*
+
+## Appendix D. Reproducing the results
+
+| Result | Command | Output |
+|---|---|---|
+| Train the network and baselines | `python -m overtake.train` | `models/overtake_net.pt`, `reports/results/test_metrics.json` |
+| Every experiment and figure | `python -m overtake.experiments all` | `reports/results/*.json`, `reports/figures/*.png` |
+| Workflow (Figure 1) | `experiments diagram` | `workflow.png` |
+| Verification (Tables 3, 5; Figures A3-A6) | `experiments solver timestep stability adaptive quadrature` | `solver.json`, `timestep.json`, `stability.json`, `adaptive.json`, `quadrature.json` |
+| Plausibility, constants, rules (Section 3.1, 5.4; Figures A2, A10, A11) | `experiments speed_trace constants rules` | `speed_trace.json`, `constants.json`, `rules.json` |
+| Model selection (Tables 6, A1; Figure A8; Appendix B) | `experiments selection ablation` | `selection.json`, `ablation.json` |
+| Comparison (Table 4, Section 5.2; Figures A1, A7) | `experiments baselines comparison` | `baselines.json`, `comparison.json` |
+| Performance (Table 6 rows 3-4, Section 6) | `experiments performance` | `performance.json` |
+| Sensitivity (Figures 2, A9) | `experiments sensitivity` | `sensitivity.json` |
+| Real races (Section 5.3, Figure 3, Appendix C) | `experiments real` (downloads about 80 MB once) | `real_data.json` |
+| Earlier runs quoted in Table 6 (slipstream row) and Appendices A-B | not regenerated by the current code | `timestep_before_slipstream_fix.json` (and figure), `timestep_after_slipstream_fix.json`, `*_before_battery_sampling.json`, `selection_min_rule.json`, `ablation_3_seeds.json` |
+| Redraw every figure from saved results | `experiments figures` | `reports/figures/*.png` |
+| Tests and report | `python -m pytest --html=reports/test_report.html --self-contained-html` | `reports/test_report.html` |
+| API documentation | `pdoc overtake --docformat numpy -o docs/api` | `docs/api/` |
+
+## Appendix E. Simulator constants
+
+Rules are fixed by the 2026 regulations; every other value is an engineering
+estimate (`overtake/physics.py`, `overtake/simulator.py`).
+
+| Group | Constant | Value |
+|---|---|---|
+| Car | Air density; rear-axle load share; car length | 1.2 kg/m³; 0.55; 5.5 m |
+| Car | Reference top speed and lap time (to convert car-advantage inputs) | 92 m/s; 90 s |
+| Run start | Corner-exit speed; dirty-air grip loss | 33 m/s × √(relative grip); 6 % × e^(−gap/1 s) |
+| Battery | Usable energy; Overtake Mode extra; power ramp-out | 4 MJ × charge; 0.5 MJ; last 20 kJ |
+| Deployment | Share of MGU-K power with Boost; standard map | 1; 0.55 |
+| Tyres | Relative grip, new tyre (dry / damp / wet) | soft 1.00 / 0.80 / 0.55; medium 0.988 / 0.79 / 0.54; hard 0.976 / 0.78 / 0.53; intermediate 0.90 / 0.86 / 0.72; wet 0.86 / 0.83 / 0.76 |
+| Tyres | Grip lost per lap (soft, medium, hard, inter, wet); cliff lap; after the cliff | 0.0018, 0.0011, 0.0007, 0.0015, 0.0012; 22, 35, 50, 25, 30; +0.004 per lap |
+| Tyres | Wear-rate change with track temperature; treaded tyres in the dry; hard tyre below 25 °C | 2 % per °C about 35 °C (limited to 0.6-1.6 times); 3 times the wear; −0.01 grip |
+| Outcome | Execution noise $\sigma$ (dry / damp / wet); extra for a rating below 90 | 0.20 / 0.24 / 0.28 s; up to 0.04 s |
+| Outcome | Caution (dry / damp / wet); defender positioning | 0 / 0.05 / 0.12 s; 0.04 s × (rating − 60)/40 |
+| Outcome | Lunge range $L$; margin slope; margin cap | 0.15 s; 5 per s; 0.5 s |
+| Outcome | $z_0$ terms | 0.5 + 1.2 × rating difference/40 + 25 × grip difference + segment + weather + circuit − 0.2 × defender Boost × defender charge |
+| Outcome | Segment (straight, slow, medium, fast corner); weather (dry, damp, wet) | 0, +0.2, −0.6, −1.6; 0, −0.5, −0.9 |
+| Outcome | Circuit passability | −2.5 (Monaco) to +0.6 (Bahrain, Spa); `generic` 0 |
+| Sampling | Weather (dry, damp, wet); segment (straight, slow, medium, fast) | 75, 13, 12 %; 55, 20, 15, 10 % |
+| Sampling | Boost use (attacker, defender); full battery; Overtake Mode | 80 %, 50 %; 15 % of attempts; gap + N(0, 0.2 s) ≤ 1 s |
+| Sampling | Car advantage: top speed; pace | N(0, 5 km/h) within ±15; N(0, 0.4 s/lap) within ±1.5 |

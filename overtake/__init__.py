@@ -20,6 +20,13 @@ Modules, in workflow order:
 | `overtake.export` | Spreadsheet of every simulated attempt and every result |
 | `overtake.realdata` | Real 2026 race data (OpenF1) and its comparison with the simulator |
 
+Command-line entry points: ``python -m overtake.train`` (train the network and
+the baselines), ``python -m overtake.predict`` (one prediction; ``--help``
+lists every option), ``python -m overtake.experiments`` (every experiment
+behind the report, or only those named), ``python -m overtake.export`` (the
+spreadsheet) and ``python -m overtake.realdata download`` (fetch and cache the
+OpenF1 data).
+
 See the README and `docs/project_documentation.md` in the repository for the
 full write-up.
 """

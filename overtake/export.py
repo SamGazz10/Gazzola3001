@@ -120,6 +120,10 @@ ATTEMPT_COLUMNS = [
 
 
 def _git_commit():
+    """Short hash of the checked-out commit, recorded in the workbook so a copy can be traced to its code.
+
+    Returns ``"unknown"`` when git is missing or the folder is not a repository.
+    """
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
                               text=True, check=True).stdout.strip()
@@ -128,6 +132,7 @@ def _git_commit():
 
 
 def _results(name):
+    """Load ``reports/results/<name>.json`` (raises FileNotFoundError if the experiment has not run)."""
     return json.loads((REPORTS / "results" / f"{name}.json").read_text())
 
 
@@ -197,16 +202,19 @@ class _Sheet:
     """Small helper for appending styled rows to a write-only worksheet."""
 
     def __init__(self, wb, name, widths):
+        """Create sheet ``name`` in workbook ``wb`` with the given column widths (characters)."""
         self.ws = wb.create_sheet(name)
         self.rows = 0  # rows written so far; write-only sheets do not track this
         for i, width in enumerate(widths, start=1):
             self.ws.column_dimensions[get_column_letter(i)].width = width
 
     def append(self, cells):
+        """Append one row of cells and count it."""
         self.ws.append(cells)
         self.rows += 1
 
     def _cell(self, value, font=None, fill=None, wrap=False, number_format=None):
+        """A write-only cell holding ``value`` with the optional font, fill, wrapping and number format."""
         cell = WriteOnlyCell(self.ws, value=value)
         if font:
             cell.font = font
@@ -219,30 +227,37 @@ class _Sheet:
         return cell
 
     def title(self, text):
+        """Write the sheet's title line."""
         self.append([self._cell(text, TITLE_FONT)])
 
     def section(self, text):
+        """Write a blank line, then a section heading."""
         self.append([])
         self.append([self._cell(text, SECTION_FONT)])
 
     def note(self, text):
+        """Write an explanatory note in the muted note style."""
         self.append([self._cell(text, NOTE_FONT)])
 
     def header(self, names):
+        """Write a table header row (bold, shaded, wrapped)."""
         self.append([self._cell(n, HEADER_FONT, HEADER_FILL, wrap=True) for n in names])
 
     def row(self, values, wrap=False, formats=None):
+        """Write one data row; ``formats`` maps a column index to an Excel number format."""
         formats = formats or {}
         self.append([self._cell(_native(v), wrap=wrap, number_format=formats.get(i))
                      for i, v in enumerate(values)])
 
     def table(self, header, rows, wrap=False, formats=None):
+        """Write a header row followed by every row in ``rows``."""
         self.header(header)
         for r in rows:
             self.row(r, wrap=wrap, formats=formats)
 
 
 def _native(value):
+    """Convert a NumPy scalar to the plain Python type openpyxl accepts, and a list to comma-separated text."""
     if isinstance(value, (np.bool_,)):
         return bool(value)
     if isinstance(value, np.integer):
@@ -267,6 +282,7 @@ def _metric_rows():
     fl = perf["flops"]
 
     def per_model(key, scale=1.0, nd=4):
+        """The metric ``key`` for the network, gradient boosting and logistic regression, scaled and rounded."""
         return [round(scale * m[key], nd) for m in (nn, gb, lr)]
 
     rows = [
@@ -384,12 +400,24 @@ def _metric_rows():
 
 
 def _write_reference_sheets(wb, attempts):
+    """Write the explanatory sheets: About, Summary, Metrics, Inputs and Model parameters.
+
+    Summary formulas refer to ranges of the Attempts sheet, so they stay live in Excel.
+
+    Parameters
+    ----------
+    wb : openpyxl.Workbook
+        Write-only workbook.
+    attempts : pandas.DataFrame
+        Output of `attempts_table`; its column order fixes the Attempts sheet's columns.
+    """
     c = _results("comparison")
     n = len(attempts)
     last = n + 1
     col = {name: get_column_letter(i) for i, name in enumerate(attempts.columns, start=1)}
 
     def rng(name):
+        """Absolute Excel range of column ``name`` on the Attempts sheet, every data row."""
         return f"Attempts!${col[name]}$2:${col[name]}${last}"
 
     # About
@@ -545,6 +573,13 @@ def _write_reference_sheets(wb, attempts):
 
 
 def _write_experiment_sheets(wb):
+    """Write one sheet per experiment from its saved ``reports/results`` JSON.
+
+    Parameters
+    ----------
+    wb : openpyxl.Workbook
+        Write-only workbook.
+    """
     sol = _results("solver")
     s = _Sheet(wb, "Solver", [14, 22, 22, 22, 22])
     s.title("Euler and RK4 against analytical solutions")
@@ -672,6 +707,13 @@ def _write_experiment_sheets(wb):
 
 
 def _write_speed_trace(wb):
+    """Write both cars' speed, position and energy every step along an 800 m straight (Figure A2's data).
+
+    Parameters
+    ----------
+    wb : openpyxl.Workbook
+        Write-only workbook.
+    """
     s = _Sheet(wb, "Speed trace", [30, 10, 16, 16, 16, 16, 18, 18])
     s.title("Both cars along an 800 m straight (default scenario, and defender at 30 % battery)")
     s.header(["Scenario", "Time (s)", "Attacker position (m)", "Defender position (m)", "Attacker speed (km/h)",
@@ -722,6 +764,13 @@ def write_workbook(path=OUT, n=300_000, log=print):
 
 
 def main(argv=None):
+    """Command-line entry point: ``python -m overtake.export [--out PATH] [--samples N]``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Arguments without the program name; ``sys.argv[1:]`` if omitted.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", default=str(OUT), help="output .xlsx path")
     parser.add_argument("--samples", type=int, default=300_000, help="number of simulated attempts")

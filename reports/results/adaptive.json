@@ -1,0 +1,31 @@
+{
+  "scenarios": 100,
+  "reference_dt": 0.001,
+  "timing_scenarios": 20000,
+  "rk4_fixed_step": {
+    "dt": 0.05,
+    "max_error_s": 2.420747738995921e-05,
+    "us_per_scenario": 177.89444499649107,
+    "rhs_evaluations_per_scenario": 579.8738381131429
+  },
+  "solve_ivp_rk45": [
+    {
+      "rtol": 0.001,
+      "max_error_s": 0.18151433001670753,
+      "us_per_scenario": 19234.515000134706,
+      "rhs_evaluations_per_scenario": 73.52
+    },
+    {
+      "rtol": 1e-06,
+      "max_error_s": 0.0004540835504935718,
+      "us_per_scenario": 101205.34099987708,
+      "rhs_evaluations_per_scenario": 384.02
+    },
+    {
+      "rtol": 1e-09,
+      "max_error_s": 1.2026065893122606e-06,
+      "us_per_scenario": 212453.25499912724,
+      "rhs_evaluations_per_scenario": 830.0
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "change": 0.1,
+  "scenarios": 2000,
+  "default_scenario": 0.47435921228811073,
+  "rows": [
+    {
+      "constant": "Corner-exit speed",
+      "name": "EXIT_SPEED_MPS",
+      "value": 33.0,
+      "default_scenario": [
+        0.5518665777479353,
+        0.40118809629874513
+      ],
+      "mean_abs_change": [
+        0.017709699140500756,
+        0.016226564862771034
+      ]
+    },
+    {
+      "constant": "Tyre friction",
+      "name": "mu_reference",
+      "value": 1.7,
+      "default_scenario": [
+        0.47748214209890694,
+        0.47152079415075576
+      ],
+      "mean_abs_change": [
+        0.015128210288124569,
+        0.013148546850095384
+      ]
+    },
+    {
+      "constant": "Rear-axle load share",
+      "name": "driven_axle_share",
+      "value": 0.55,
+      "default_scenario": [
+        0.47748214209890694,
+        0.47152079415075576
+      ],
+      "mean_abs_change": [
+        0.015128210288124564,
+        0.013148546850095377
+      ]
+    },
+    {
+      "constant": "Engine power",
+      "name": "ice_power_w",
+      "value": 400000.0,
+      "default_scenario": [
+        0.4811977630781212,
+        0.47137307150215396
+      ],
+      "mean_abs_change": [
+        0.014844129915541316,
+        0.01443464530138159
+      ]
+    },
+    {
+      "constant": "Standard-map share",
+      "name": "STANDARD_MAP_SHARE",
+      "value": 0.55,
+      "default_scenario": [
+        0.47435921228811073,
+        0.47435921228811073
+      ],
+      "mean_abs_change": [
+        0.008967991493209324,
+        0.008608128978870784
+      ]
+    },
+    {
+      "constant": "Mass",
+      "name": "mass_kg",
+      "value": 800.0,
+      "default_scenario": [
+        0.5089346700600746,
+        0.4437657788947179
+      ],
+      "mean_abs_change": [
+        0.008582030469004995,
+        0.007831143429169622
+      ]
+    },
+    {
+      "constant": "Lunge range",
+      "name": "LUNGE_RANGE_S",
+      "value": 0.15,
+      "default_scenario": [
+        0.44866430294646675,
+        0.4999886159577316
+      ],
+      "mean_abs_change": [
+        0.007089912890788414,
+        0.007191175190131062
+      ]
+    },
+    {
+      "constant": "Execution noise",
+      "name": "EXECUTION_SD",
+      "value": {
+        "dry": 0.2,
+        "damp": 0.24,
+        "wet": 0.28
+      },
+      "default_scenario": [
+        0.47590241445690795,
+        0.473410924936598
+      ],
+      "mean_abs_change": [
+        0.007107668424482485,
+        0.007062799537263663
+      ]
+    },
+    {
+      "constant": "Usable battery energy",
+      "name": "BATTERY_USABLE_J",
+      "value": 4000000.0,
+      "default_scenario": [
+        0.4981629820858437,
+        0.47435921228811073
+      ],
+      "mean_abs_change": [
+        0.006511648963864785,
+        0.005879778347960337
+      ]
+    },
+    {
+      "constant": "Drag area",
+      "name": "cda_m2",
+      "value": 1.0,
+      "default_scenario": [
+        0.45841674659285664,
+        0.4840303876658745
+      ],
+      "mean_abs_change": [
+        0.005974372986398642,
+        0.0052185885573893314
+      ]
+    },
+    {
+      "constant": "Downforce area",
+      "name": "cla_m2",
+      "value": 3.0,
+      "default_scenario": [
+        0.4757724788639594,
+        0.4731006050166988
+      ],
+      "mean_abs_change": [
+        0.005072560375705146,
+        0.00462199340356087
+      ]
+    },
+    {
+      "constant": "Margin logit slope",
+      "name": "MARGIN_LOGIT_PER_S",
+      "value": 5.0,
+      "default_scenario": [
+        0.4692841813729578,
+        0.479032839637115
+      ],
+      "mean_abs_change": [
+        0.00431790135051768,
+        0.003935691428930312
+      ]
+    },
+    {
+      "constant": "Slipstream drag reduction",
+      "name": "tow_max",
+      "value": 0.25,
+      "default_scenario": [
+        0.4637925914698839,
+        0.4850853657608307
+      ],
+      "mean_abs_change": [
+        0.002915485450753726,
+        0.0028793184085667747
+      ]
+    }
+  ]
+}
