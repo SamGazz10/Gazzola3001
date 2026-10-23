@@ -49,11 +49,9 @@ must be evaluated quickly, and a training pipeline that can be retrained on
 real labelled attempts (`python -m overtake.train --data`) once they exist.
 
 **Scope and its limits.** One attempt on one straight, without energy strategy
-across the lap; driver skill is one rating; safety cars and damage are out of
-scope. Battery charge and Boost use are not in public timing data, so the
-training data are simulated and the network can only be as right as the
-simulator. In return the ground truth is exact, which makes rigorous
-validation possible.
+across the lap; safety cars and damage are out of scope. Battery and Boost use
+are not in public data, so training data are simulated and the network is only
+as right as the simulator; in return the ground truth is exact.
 
 ## 2. Inputs, outputs and data
 
@@ -205,13 +203,10 @@ than into a corner).
 
 ### 3.5 Implementation and reproducibility
 
-The package `overtake` has one module per stage (schema, physics, simulator,
-network, training, baselines, prediction, experiments, figures, export, real
-data); 88 pytest tests cover the numerics, pipeline and notebooks, and
-`notebooks/network_by_hand.ipynb` reproduces a prediction step by step.
-`python -m overtake.train` and `python -m overtake.experiments all`
-regenerate every result; work was done on Git feature branches merged into
-`main`.
+The package `overtake` has one module per stage; 88 pytest tests cover the
+numerics, pipeline and notebooks; `python -m overtake.train` and
+`python -m overtake.experiments all` regenerate every result; work was done
+on Git feature branches merged into `main`.
 
 ## 4. Alternative solutions
 
@@ -221,7 +216,6 @@ regenerate every result; work was done on Git feature branches merged into
 |---|---|---|---|
 | RK4 | Forward Euler | Worst deficit error at 0.05 s: 13 ms against 0.059 ms; Euler needs 4.6 times RK4's run time to meet 1 ms, 46 times to match it; overdraws the battery from 0.075 s (RK4: 0.125 s) | RK4 |
 | Fixed-step RK4, vectorised | Adaptive RK45 with events (SciPy [17]), one scenario at a time | At tolerance 10⁻⁶: 0.45 ms worst error (RK4: 0.024 ms, same 100 scenarios) at about 570 times the cost; adaptive steps cannot be shared across a batch | RK4 |
-| Hermite crossing | Straight-line interpolation | 0.059 against 0.20 ms at 0.05 s, same cost | Hermite |
 | 16-point Gauss-Legendre | Simpson, trapezoid, Monte Carlo | 12 nodes reach 2×10⁻¹⁵; Simpson needs 257 points for 3×10⁻¹¹; Monte Carlo (1,600 replays) 0.7 points RMS, 167 times slower | Gauss-Legendre |
 
 *Table 4. Learned models (same inputs and training data) against direct simulation on 30,000 test attempts; 95 % bootstrap interval in brackets; by region in Figure A1.*
@@ -242,11 +236,8 @@ Logistic regression cannot represent interactions, so its error is largest
 where they dominate (straights, wet tracks, unsuited tyres). Gradient boosting
 trains 24 times faster but is 1.9 times less accurate, worse in every region
 and less well calibrated: piecewise-constant trees approximate smooth physics
-poorly. Neither baseline was handicapped: of nine gradient-boosting settings
-the one used (up to 500 trees with early stopping, learning rate 0.1,
-31 leaves) was best on validation data (3.7 points, others up to 4.2), and
-logistic regression is insensitive to its penalty (15.5 points for
-C = 0.1-10). Direct simulation is exact but 20 times slower, and can use real
+poorly. Neither baseline was handicapped by its settings (Appendix A).
+Direct simulation is exact but 20 times slower, and can use real
 data only by fitting its few outcome constants to aggregate pass rates; the
 network needs attempts with all 19 inputs. The network is the most accurate
 fast surrogate, and its 208 s of training pays for itself after about
@@ -348,9 +339,8 @@ it gives the attacker more energy for one straight than real drivers spend.
 
 ### 5.4 Sensitivity and engineering interpretation
 
-Varying one input at a time (Figure A9), the network moves the same way as
-the simulator for every input; the gap, the straight's length, both batteries
-and Boost matter most. Of the estimated constants (Figure A10), the
+The network moves the same way as the simulator for every input (Figure A9);
+gap, straight length, batteries and Boost matter most. Of the estimated constants (Figure A10), the
 corner-exit speed matters most: 10 % slower or faster moves the default
 scenario from 47 % to 55 % or 40 %, because it sets how long both cars are
 traction-limited. The two Overtake Mode levers help different attackers
@@ -361,10 +351,9 @@ plentiful (18 % if power tapered from 290 km/h, 47 % at 337 km/h).
 
 ### 5.5 Influence on model selection, and what validation cannot establish
 
-The convergence study exposed a modelling error and, with the stability
-study, set the step; validation log loss with the one-standard-error rule
-[14] chose the network size; five-seed comparisons chose the ensemble and
-rejected physics-informed inputs; real data was kept out of tuning.
+Validation set the step (convergence and stability studies), the network size
+(one-standard-error rule [14]) and the ensemble and inputs (five seeds); real
+data was kept out of tuning.
 Validation cannot establish that the estimated constants are right for real
 cars, or the network's accuracy on real attempts; it is calibrated against
 the simulator, on test data from the same sampler as its training data.
@@ -396,19 +385,16 @@ model and quadrature take 3 %. Training dominates the whole pipeline: one
 epoch of one network takes 6.8 s (the first network ran 53), against 33 s
 to simulate all 300,000 attempts.
 
-**FLOPs and arithmetic intensity.** One ensemble prediction costs 66,565
-FLOPs (from the layer sizes) and one simulation about 68,600 (153 RK4 steps of
-about 444 hand-counted FLOPs, plus the quadrature), yet the network's forward
-pass is about 58 times faster (2.2 against 130 µs; with input checks, 20 times,
-Table 4). The difference is mostly arithmetic intensity: dense matrix products
-reuse each weight for every scenario in a batch, so intensity rises from 0.5
-FLOP/byte for one prediction (memory-bound) to 446 at a batch of 10,000, where
-the ensemble runs at 30 GFLOP/s (compute-bound). The simulator's element-wise
-float64 operations move about 24 bytes per FLOP, so its 0.5 GFLOP/s is limited
-by memory traffic; PyTorch also uses all threads, NumPy's element-wise
-operations one. Memory is modest: 132 kB for the ensemble, a peak of 12 MB per
-20,000-scenario chunk (tracemalloc) and 115 MB for the dataset; chunking caps
-the simulator's memory.
+**FLOPs and arithmetic intensity.** An ensemble prediction costs 66,565 FLOPs
+and a simulation about 68,600 (153 RK4 steps of about 444 hand-counted FLOPs,
+plus quadrature), yet the network's forward pass is about 58 times faster
+(2.2 against 130 µs; 20 times with input checks). Dense matrix products reuse
+each weight across a batch, so intensity rises from 0.5 FLOP/byte for one
+prediction (memory-bound) to 446 at 10,000, where the ensemble runs at
+30 GFLOP/s; the simulator's float64 element-wise operations move about 24 bytes
+per FLOP, so its 0.5 GFLOP/s is memory-bound, and NumPy uses one thread where
+PyTorch uses all. Memory: 132 kB ensemble, 12 MB peak per 20,000-scenario
+chunk (tracemalloc), 115 MB dataset; chunking caps the simulator's memory.
 
 **Data requirements.** The error falls from 6.8 points with 10,000 training
 attempts to 2.2 with 240,000 and is still falling, while a larger network does
@@ -417,10 +403,9 @@ not help (Table A1): data, not size, limits accuracy.
 ## 7. Limitations and lessons learned
 
 **Limitations.** The model is only as realistic as the simulator (estimated
-constants, one straight, a simple driver model, no labelled real attempts),
-and real races show it too optimistic from 0.5-1 s behind. The network is
-less accurate for rare combinations, beyond its training range and along the
-battery axis.
+constants, one straight, a simple driver model), and real races show it too
+optimistic from 0.5-1 s behind; the network is weakest for rare combinations,
+beyond its training range and along the battery axis.
 
 **Lessons.**
 
@@ -443,30 +428,49 @@ on simulation if energy data appear (untested).
 
 ### Disclosure
 
-Claude Code (Anthropic) was used throughout, first in a cloud session and
-then in a local one.
-
-| Task | What the AI did | How it was checked |
-|---|---|---|
-| Rules research | Summarised the 2026 rules; flagged conflicting reports | Sources in the references |
-| Physics, numerics, network, experiments | Wrote the code, figures and tests | 88 tests; exact-solution, convergence and stability studies; numbers regenerated by code |
-| Real-data comparison | Found OpenF1; wrote download, filters, comparison | Filters tested on hand-made races; passes traced to raw data |
-| Review | Audited the project against the brief | Each finding re-checked by a second agent and by running code |
-| Documentation, presentation | Drafted this report, slides and notes | Checked against the results files |
-
-AI errors caught: a simulator too crude for the unit, a slipstream
-discontinuity, a stability argument that missed the battery ramp, two wrong
-diagnoses of the full-battery bias, wrong test expectations, a filter
-counting safety-car position changes, and an unsourced wrong speed.
+Claude Code (Anthropic) was used throughout, first in a cloud session and then
+a local one. It summarised the 2026 rules; wrote the code, figures and 88
+tests; researched the current-season sources I named (Kaggle, OpenF1) and
+built the OpenF1 comparison; audited the project against the brief; and
+drafted this report and the slides. Its work was checked by the tests, the
+exact-solution, convergence and stability studies, regenerating every number
+from code, tracing real passes back to the raw data, and a second agent
+re-checking each audit finding. Other AI errors caught: a first simulator too
+crude for the unit, a stability argument that missed the battery ramp, two
+wrong diagnoses of the full-battery bias, a filter counting safety-car position
+changes, and an unsourced speed.
 
 ### Reflection
 
-*To be written by Sam in his own words (the brief requires a personal
-reflection). Cover: which tools were used and for what; the approximate level
-of AI contribution; why AI was used for those tasks; how AI-generated material
-was checked; which important decisions remained yours; errors, limitations or
-unhelpful suggestions from the AI; and how AI use affected your understanding
-and workflow.*
+Claude Code was the only AI tool I used. The problem was my idea, as was the
+decision to use a neural network. My role was to check that the information
+was correct and within the scope of the project, to fine-tune the AI's output
+and to suggest improvements. The AI wrote all of the code, generated the
+simulated data and formatted everything so it was presentable. I asked it to
+research data from the current F1 season, from sources such as Kaggle and
+OpenF1, and it used OpenF1 to cross-check the simulations against real 2026
+races.
+
+I used AI to bridge the gap between my idea and the final product: my coding
+knowledge is nowhere near advanced enough to build a neural network on my
+own. The checks I cared about most were model accuracy and code quality. I
+trusted the output because I had the AI audit its own work, with multiple
+agents scanning everything for problems, but it still made mistakes. One was
+in the slipstream, which switched off instantly when the cars drew level: the
+jump in drag made RK4 converge at only first order. The time-step study
+exposed it; fading the slipstream over one car length fixed it.
+
+I had to relearn methods such as RK4, and I researched what F1 drivers weigh
+up when planning an overtake, so I could judge whether each input's weighting
+was acceptable.
+
+Without AI I could not have reached this standard; I would probably have built
+a basic logistic regression instead of a neural network. The project still
+deepened my understanding of how prediction models work and what makes them
+efficient and accurate. Next time I would choose a problem with real, complete
+data: Boost and Overtake Mode only arrived in 2026, so there was no data with
+battery and Boost information to train on, and the simulated data may contain
+inaccuracies.
 
 ## References
 
@@ -549,6 +553,13 @@ dashed; the chosen step is marked.*
 | 64-64 (selected) | 6,589 | 13,313 | 0.2594 ± 0.0029 | 2.2 |
 | 128-128-64 | 29,373 | 59,649 | 0.2591 ± 0.0029 | 2.3 |
 | 256-256-128 | 107,709 | 217,601 | 0.2606 ± 0.0030 | 2.6 |
+
+*Baselines.* Of nine gradient-boosting settings (`experiments baselines`), the
+one used (up to 500 trees with early stopping, learning rate 0.1, 31 leaves)
+was best on validation data (3.7 points, others up to 4.2); logistic
+regression gives 15.5 points for any penalty C = 0.1-10. Straight-line
+interpolation at the braking point would give 0.20 ms worst deficit error at
+0.05 s, against 0.059 ms with the Hermite crossing (`experiments timestep`).
 
 The one-standard-error rule was adopted after two runs on different data
 ranked 64-64 and 128-128-64 in opposite orders by less than 0.001: choosing
