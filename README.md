@@ -80,6 +80,12 @@ python -m overtake.predict --condition dry --tyre soft --segment straight --batt
 python -m overtake.predict --help          # every option
 ```
 
+Or set every input with sliders and drop-downs in your browser:
+
+```bash
+python -m overtake.app                     # opens http://127.0.0.1:8000; Ctrl+C to stop
+```
+
 From Python:
 
 ```python
@@ -114,7 +120,7 @@ Times are rough and machine-dependent.
 | One experiment | `python -m overtake.experiments solver` (or `timestep`, `stability`, `adaptive`, `quadrature`, `speed_trace`, `constants`, `rules`, `selection`, `ablation`, `baselines`, `comparison`, `performance`, `sensitivity`, `real`, `diagram`) | seconds to 10 min | |
 | Redraw every figure from the saved results | `python -m overtake.experiments figures` | seconds | `reports/figures/*.png` |
 | Comparison with real 2026 races | `python -m overtake.experiments real` | ~5 min first time (download), then ~1 min | `reports/results/real_data.json`, `reports/figures/real_*.png` |
-| Tests (84, all offline) | `python -m pytest` | ~2 min | |
+| Tests (88, all offline) | `python -m pytest` | ~2 min | |
 | Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~2 min | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |
@@ -139,6 +145,7 @@ overtake/                 Python package
   train.py                training, metrics, evaluation against alternatives
   baselines.py            logistic regression, gradient-boosted trees
   predict.py              command-line and Python prediction
+  app.py                  interactive calculator in the browser (python -m overtake.app)
   experiments.py          verification, model selection, comparison, performance, sensitivity
   export.py               spreadsheet of every simulated attempt and every result
   realdata.py             download of real 2026 race data (OpenF1) and comparison with the simulator
