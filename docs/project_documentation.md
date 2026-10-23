@@ -339,12 +339,12 @@ it gives the attacker more energy for one straight than real drivers spend.
 
 ### 5.4 Sensitivity and engineering interpretation
 
-The network moves the same way as the simulator for every input (Figure A9);
-gap, straight length, batteries and Boost matter most. Of the estimated constants (Figure A10), the
+The network moves the same way as the simulator for every input (Figure A6);
+gap, straight length, batteries and Boost matter most. Of the estimated constants (Figure A7), the
 corner-exit speed matters most: 10 % slower or faster moves the default
 scenario from 47 % to 55 % or 40 %, because it sets how long both cars are
 traction-limited. The two Overtake Mode levers help different attackers
-(Figure A11): the extra energy matters only when the battery cannot cover the
+(Figure A8): the extra energy matters only when the battery cannot cover the
 straight (at 30 % charge, 0 to 1 MJ takes P from 0.1 % to 27 %; at 100 % it
 changes nothing), while the later taper start helps whenever energy is
 plentiful (18 % if power tapered from 290 km/h, 47 % at 337 km/h).
@@ -533,18 +533,6 @@ its stability limit.*
 full two-car model, with RK4 using straight-line crossing interpolation
 dashed; the chosen step is marked.*
 
-![Quadrature and Monte Carlo](../reports/figures/quadrature_study.png)
-
-*Figure A6. Quadrature rules and Monte Carlo against a 200-node reference.*
-
-![Calibration](../reports/figures/calibration.png)
-
-*Figure A7. Calibration of the three learned models on the test set.*
-
-![Model selection](../reports/figures/model_selection.png)
-
-*Figure A8. Network size (left) and training-set size (right), validation set.*
-
 *Table A1. Network sizes (validation set).*
 
 | Hidden layers | Parameters | FLOPs per prediction | Validation log loss ± standard error | Error against exact P (points) |
@@ -554,12 +542,9 @@ dashed; the chosen step is marked.*
 | 128-128-64 | 29,373 | 59,649 | 0.2591 ± 0.0029 | 2.3 |
 | 256-256-128 | 107,709 | 217,601 | 0.2606 ± 0.0030 | 2.6 |
 
-*Baselines.* Of nine gradient-boosting settings (`experiments baselines`), the
-one used (up to 500 trees with early stopping, learning rate 0.1, 31 leaves)
-was best on validation data (3.7 points, others up to 4.2); logistic
-regression gives 15.5 points for any penalty C = 0.1-10. Straight-line
-interpolation at the braking point would give 0.20 ms worst deficit error at
-0.05 s, against 0.059 ms with the Hermite crossing (`experiments timestep`).
+*Baselines.* Of nine gradient-boosting settings, the one used (learning rate
+0.1, 31 leaves) was best on validation data (3.7 points, others up to 4.2);
+logistic regression gives 15.5 points for any penalty (`experiments baselines`).
 
 The one-standard-error rule was adopted after two runs on different data
 ranked 64-64 and 128-128-64 in opposite orders by less than 0.001: choosing
@@ -567,20 +552,20 @@ the raw minimum would have chosen on noise.
 
 ![Sensitivity](../reports/figures/sensitivity.png)
 
-*Figure A9. One-at-a-time sensitivity around the default scenario: network
+*Figure A6. One-at-a-time sensitivity around the default scenario: network
 (bars) against the exact probability (ticks). Gap, straight length and the two
 batteries matter most; driver ratings and track temperature least.*
 
 ![Estimated constants](../reports/figures/constants.png)
 
-*Figure A10. Mean change in the exact probability over 2,000 random scenarios
+*Figure A7. Mean change in the exact probability over 2,000 random scenarios
 when each estimated constant is 10 % lower or higher (`experiments
 constants`). Tyre friction and the rear-axle load share act only through
 their product, so their effects are equal.*
 
 ![Overtake Mode rules](../reports/figures/rules.png)
 
-*Figure A11. Exact probability in the default scenario against the Overtake
+*Figure A8. Exact probability in the default scenario against the Overtake
 Mode extra energy (left) and the speed where electrical power starts to taper
 (right), at three attacker charge levels (`experiments rules`).*
 
@@ -655,20 +640,6 @@ measured at the start of the lap rather than at the detection point. The
 circuit comparison uses 16 of the 17 races: one race's circuit is not in the
 simulator's list.
 
-![Speed traps](../reports/figures/real_speed_traps.png)
-
-*Figure C1. Fastest speed-trap reading per lap, every 2026 race.*
-
-![Telemetry](../reports/figures/real_telemetry.png)
-
-*Figure C2. Real full-throttle speed against the RK4 car model: the longest
-straight at Monza (left) and the RMS error over all 135 straights (right).*
-
-![Circuits](../reports/figures/real_circuits.png)
-
-*Figure C3. Real on-track passes per lap against the simulator's circuit
-passability.*
-
 ## Appendix D. Reproducing the results
 
 | Result | Command | Output |
@@ -676,12 +647,12 @@ passability.*
 | Train the network and baselines | `python -m overtake.train` | `models/overtake_net.pt`, `reports/results/test_metrics.json` |
 | Every experiment and figure | `python -m overtake.experiments all` | `reports/results/*.json`, `reports/figures/*.png` |
 | Workflow (Figure 1) | `experiments diagram` | `workflow.png` |
-| Verification (Tables 3, 5; Figures A3-A6) | `experiments solver timestep stability adaptive quadrature` | `solver.json`, `timestep.json`, `stability.json`, `adaptive.json`, `quadrature.json` |
-| Plausibility, constants, rules (Section 3.1, 5.4; Figures A2, A10, A11) | `experiments speed_trace constants rules` | `speed_trace.json`, `constants.json`, `rules.json` |
-| Model selection (Tables 6, A1; Figure A8; Appendix B) | `experiments selection ablation` | `selection.json`, `ablation.json` |
-| Comparison (Table 4, Section 5.2; Figures A1, A7) | `experiments baselines comparison` | `baselines.json`, `comparison.json` |
+| Verification (Tables 3, 5; Figures A3-A5) | `experiments solver timestep stability adaptive quadrature` | `solver.json`, `timestep.json`, `stability.json`, `adaptive.json`, `quadrature.json` |
+| Plausibility, constants, rules (Section 3.1, 5.4; Figures A2, A7, A8) | `experiments speed_trace constants rules` | `speed_trace.json`, `constants.json`, `rules.json` |
+| Model selection (Tables 6, A1; Appendix B) | `experiments selection ablation` | `selection.json`, `ablation.json` |
+| Comparison (Table 4, Section 5.2; Figure A1) | `experiments baselines comparison` | `baselines.json`, `comparison.json` |
 | Performance (Table 6 rows 3-4, Section 6) | `experiments performance` | `performance.json` |
-| Sensitivity (Figures 2, A9) | `experiments sensitivity` | `sensitivity.json` |
+| Sensitivity (Figures 2, A6) | `experiments sensitivity` | `sensitivity.json` |
 | Real races (Section 5.3, Figure 3, Appendix C) | `experiments real` (downloads about 80 MB once) | `real_data.json` |
 | Earlier runs quoted in Table 6 (slipstream row) and Appendices A-B | not regenerated by the current code | `timestep_before_slipstream_fix.json` (and figure), `timestep_after_slipstream_fix.json`, `*_before_battery_sampling.json`, `selection_min_rule.json`, `ablation_3_seeds.json` |
 | Redraw every figure from saved results | `experiments figures` | `reports/figures/*.png` |
@@ -697,19 +668,14 @@ estimate (`overtake/physics.py`, `overtake/simulator.py`).
 | Group | Constant | Value |
 |---|---|---|
 | Car | Air density; rear-axle load share; car length | 1.2 kg/m³; 0.55; 5.5 m |
-| Car | Reference top speed and lap time (to convert car-advantage inputs) | 92 m/s; 90 s |
 | Run start | Corner-exit speed; dirty-air grip loss | 33 m/s × √(relative grip); 6 % × e^(−gap/1 s) |
 | Battery | Usable energy; Overtake Mode extra; power ramp-out | 4 MJ × charge; 0.5 MJ; last 20 kJ |
 | Deployment | Share of MGU-K power with Boost; standard map | 1; 0.55 |
-| Tyres | Relative grip, new tyre (dry / damp / wet) | soft 1.00 / 0.80 / 0.55; medium 0.988 / 0.79 / 0.54; hard 0.976 / 0.78 / 0.53; intermediate 0.90 / 0.86 / 0.72; wet 0.86 / 0.83 / 0.76 |
-| Tyres | Grip lost per lap (soft, medium, hard, inter, wet); cliff lap; after the cliff | 0.0018, 0.0011, 0.0007, 0.0015, 0.0012; 22, 35, 50, 25, 30; +0.004 per lap |
-| Tyres | Wear-rate change with track temperature; treaded tyres in the dry; hard tyre below 25 °C | 2 % per °C about 35 °C (limited to 0.6-1.6 times); 3 times the wear; −0.01 grip |
+| Tyres | Grip relative to a new soft in the dry, by compound, surface, age and track temperature | tables in `simulator.GRIP`, `DEG_PER_LAP`, `CLIFF_LAP` |
 | Outcome | Execution noise $\sigma$ (dry / damp / wet); extra for a rating below 90 | 0.20 / 0.24 / 0.28 s; up to 0.04 s |
 | Outcome | Caution (dry / damp / wet); defender positioning | 0 / 0.05 / 0.12 s; 0.04 s × (rating − 60)/40 |
 | Outcome | Lunge range $L$; margin slope; margin cap | 0.15 s; 5 per s; 0.5 s |
 | Outcome | $z_0$ terms | 0.5 + 1.2 × rating difference/40 + 25 × grip difference + segment + weather + circuit − 0.2 × defender Boost × defender charge |
 | Outcome | Segment (straight, slow, medium, fast corner); weather (dry, damp, wet) | 0, +0.2, −0.6, −1.6; 0, −0.5, −0.9 |
 | Outcome | Circuit passability | −2.5 (Monaco) to +0.6 (Bahrain, Spa); `generic` 0 |
-| Sampling | Weather (dry, damp, wet); segment (straight, slow, medium, fast) | 75, 13, 12 %; 55, 20, 15, 10 % |
-| Sampling | Boost use (attacker, defender); full battery; Overtake Mode | 80 %, 50 %; 15 % of attempts; gap + N(0, 0.2 s) ≤ 1 s |
-| Sampling | Car advantage: top speed; pace | N(0, 5 km/h) within ±15; N(0, 0.4 s/lap) within ±1.5 |
+| Sampling | Training scenarios: mostly dry straights, Boost for most attackers, 15 % full batteries, Overtake Mode within 1 s | `simulator.sample_scenarios` |
