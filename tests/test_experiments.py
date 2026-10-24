@@ -55,3 +55,12 @@ def test_overtake_mode_energy_matters_only_when_the_battery_is_short():
     with_bonus = simulator.probability(scenarios)
     assert with_bonus[0] == pytest.approx(without[0], abs=1e-6)
     assert with_bonus[1] > without[1] + 0.01
+
+
+def test_fia_issue17_power_limit_matches_the_regulation_text():
+    """Article C5.2.8: 350 kW to 290 km/h, 100 kW at 340, zero at 345; with Overtake Mode full power to 337.5, zero at 355."""
+    import numpy as np
+    from overtake.experiments import fia_issue17_power_limit
+    kph = np.array([250, 290, 340, 345, 337.5, 355])
+    om = np.array([False, False, False, False, True, True])
+    assert fia_issue17_power_limit(kph / 3.6, om) == pytest.approx([350e3, 350e3, 100e3, 0, 350e3, 0])

@@ -120,7 +120,7 @@ Times are rough and machine-dependent.
 | One experiment | `python -m overtake.experiments solver` (or `timestep`, `stability`, `adaptive`, `quadrature`, `speed_trace`, `constants`, `rules`, `selection`, `ablation`, `baselines`, `comparison`, `performance`, `sensitivity`, `real`, `diagram`) | seconds to 10 min | |
 | Redraw every figure from the saved results | `python -m overtake.experiments figures` | seconds | `reports/figures/*.png` |
 | Comparison with real 2026 races | `python -m overtake.experiments real` | ~5 min first time (download), then ~1 min | `reports/results/real_data.json`, `reports/figures/real_*.png` |
-| Tests (88, all offline) | `python -m pytest` | ~2 min | |
+| Tests (89, all offline) | `python -m pytest` | ~2 min | |
 | Test report | `python -m pytest --html=reports/test_report.html --self-contained-html` | ~2 min | `reports/test_report.html` |
 | HTML API docs | `pdoc overtake --docformat numpy -o docs/api` | seconds | `docs/api/` |
 | Walkthrough notebook | `jupyter notebook notebooks/walkthrough.ipynb` | | runs on Google Colab too |

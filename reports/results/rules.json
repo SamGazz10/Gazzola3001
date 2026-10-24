@@ -83,5 +83,13 @@
         0.5345427089383726
       ]
     }
+  },
+  "fia_issue17_taper": {
+    "default_scenario_model": 0.47435921228811073,
+    "default_scenario_fia": 0.4565982008521514,
+    "scenarios": 3000,
+    "mean_abs_change": 0.0015834373814328918,
+    "mean_change": 0.00017062407164742806,
+    "max_abs_change": 0.07150536828854204
   }
 }

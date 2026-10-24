@@ -27,9 +27,9 @@ drivers ration battery energy across the lap.
 **Context.** The 2026 power unit pairs a 400 kW engine with a 350 kW electric
 motor-generator (MGU-K) on the rear axle and a battery of about 4 MJ usable
 energy [1, 2, 5, 6], which full electrical power empties in about 11 s, less
-than one long straight. Electrical power also tapers from 290 km/h to zero at
-355 km/h; Overtake Mode, earned within 1 s of the car ahead at a detection
-point, adds 0.5 MJ and full power to 337 km/h [1-4]. Overtaking has become a
+than one long straight. Electrical power also tapers above 290 km/h (to zero
+at 345 km/h [7]); Overtake Mode, earned within 1 s of the car ahead at a
+detection point, adds 0.5 MJ and full power to 337 km/h [1-4, 7]. Overtaking has become a
 mechanical-engineering problem of longitudinal vehicle dynamics and
 hybrid-powertrain energy management: traction, drag, slipstream and how much
 energy each car can deploy over the remaining distance.
@@ -112,7 +112,7 @@ $$\dot x = v, \qquad m\,\dot v = \min(F_P, F_T) - F_D - F_R, \qquad \dot e = P_E
 
 * **Drive force** $F_P = \eta\,(P_{ICE} + P_E)/v$, with electrical power
   $P_E = s\,P_K(v)\,\min\big(1, (E-e)/S\big)$: $P_K$ is 350 kW to 290 km/h,
-  falling to zero at 355 km/h (full power to 337 km/h with Overtake Mode); the
+  falling linearly to zero at 355 km/h (Appendix E; full power to 337 km/h with Overtake Mode); the
   deployment share $s$ is 1 with Boost and 0.55 on the standard map; $E$ is
   the energy available; over the last $S = 20$ kJ the power fades out, keeping
   the equations continuous.
@@ -135,7 +135,7 @@ car; the whole charge available for this straight.
 
 | Parameter | Value | Source |
 |---|---|---|
-| MGU-K power; taper; Overtake Mode | 350 kW; 290 → 355 km/h; full power to 337 km/h and +0.5 MJ | regulations [1, 2, 4, 7] |
+| MGU-K power; taper; Overtake Mode | 350 kW; 290 → 355 km/h, linear (simplified, Appendix E); full power to 337 km/h and +0.5 MJ | regulations [1, 2, 4, 7] |
 | Engine power; usable battery energy | 400 kW; 4 MJ | [5]; estimate [6] |
 | Mass; $C_DA$, $C_LA$ | 800 kg; 1.0 m², 3.0 m² | estimates (768 kg minimum plus fuel) |
 | $\mu$ (new soft, dry), $c_{rr}$, $\eta$; slipstream | 1.7, 0.012, 0.95; 25 % less drag, 20 m decay | estimates |
@@ -203,7 +203,7 @@ than into a corner).
 
 ### 3.5 Implementation and reproducibility
 
-The package `overtake` has one module per stage; 88 pytest tests cover the
+The package `overtake` has one module per stage; 89 pytest tests cover the
 numerics, pipeline and notebooks; `python -m overtake.train` and
 `python -m overtake.experiments all` regenerate every result; work was done
 on Git feature branches merged into `main`.
@@ -429,7 +429,7 @@ on simulation if energy data appear (untested).
 ### Disclosure
 
 Claude Code (Anthropic) was used throughout, first in a cloud session and then
-a local one. It summarised the 2026 rules; wrote the code, figures and 88
+a local one. It summarised the 2026 rules; wrote the code, figures and 89
 tests; researched the current-season sources I named (Kaggle, OpenF1) and
 built the OpenF1 comparison; audited the project against the brief; and
 drafted this report. Its work was checked by the tests, the
@@ -485,8 +485,8 @@ inaccuracies.
 5. PMW Magazine, "FIA signs off 2026 F1 PU rules with MGU-H dropped and tight constraints on ICE design".
    <https://pmw-magazine.com/news/race-series-news/fia-signs-off-2026-f1-pu-rules-with-mgu-h-dropped-and-tight-constraints-on-ice-design.html>
 6. Honda, "2026 Formula 1 Regulations Overview". <https://global.honda/en/F1/features/2026_Commentary/regulations/>
-7. FIA, 2026 Formula 1 Technical Regulations, Section C (Power Unit), Issue 4, 2023.
-   <https://FIA.com/sites/default/files/fia_2026_formula_1_technical_regulations_pu_-_issue_4_-_2023-10-25.pdf>
+7. FIA, 2026 F1 Regulations, Section C: Technical Regulations, Issue 17, 28 April 2026, Article C5.2.
+   <https://www.fia.com/system/files/documents/fia_2026_f1_regulations_-_section_c_technical_-_iss_17_-_2026-04-28.pdf>
 8. The Race, "Boost, overtake mode, active aero: key 2026 F1 terms explained".
    <https://www.the-race.com/formula-1/boost-overtake-mode-active-aero-recharge-key-2026-terms-explained>
 9. S. C. Chapra and R. P. Canale, *Numerical Methods for Engineers*, McGraw-Hill (Runge-Kutta methods, stability, Gauss quadrature).
@@ -669,6 +669,7 @@ estimate (`overtake/physics.py`, `overtake/simulator.py`).
 |---|---|---|
 | Car | Air density; rear-axle load share; car length | 1.2 kg/m³; 0.55; 5.5 m |
 | Run start | Corner-exit speed; dirty-air grip loss | 33 m/s × √(relative grip); 6 % × e^(−gap/1 s) |
+| Rules | MGU-K taper without Overtake Mode | Model: linear from 350 kW at 290 km/h to zero at 355 km/h, from the 2025 rule summaries [1-4]. Regulations, Issue 17 [7]: 1800 − 5v kW (100 kW at 340 km/h), then zero at 345 km/h. With the regulation taper the exact P changes by 0.16 points on average over 3,000 scenarios (default scenario 47.4 % → 45.7 %; `experiments rules`) |
 | Battery | Usable energy; Overtake Mode extra; power ramp-out | 4 MJ × charge; 0.5 MJ; last 20 kJ |
 | Deployment | Share of MGU-K power with Boost; standard map | 1; 0.55 |
 | Tyres | Grip relative to a new soft in the dry, by compound, surface, age and track temperature | tables in `simulator.GRIP`, `DEG_PER_LAP`, `CLIFF_LAP` |

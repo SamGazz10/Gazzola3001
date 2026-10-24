@@ -754,11 +754,17 @@ def rules(energies_mj=(0.0, 0.25, 0.5, 0.75, 1.0), taper_starts_kph=(290, 300, 3
     batteries : sequence of float
         Attacker state of charge, %.
 
+    Also compares the model's linear MGU-K taper (from the 2025 rule summaries)
+    with the piecewise taper of the FIA 2026 Technical Regulations, Issue 17,
+    Article C5.2.8 (`fia_issue17_power_limit`): the exact probability for the
+    default scenario and the mean change over 3,000 random scenarios.
+
     Returns
     -------
     dict
-        Exact P per battery level for each energy and each taper start, and
-        the 2026 values of both parameters.
+        Exact P per battery level for each energy and each taper start, the
+        2026 values of both parameters, and the ``fia_issue17_taper``
+        comparison.
     """
     scenarios = pd.DataFrame([{**DEFAULTS, "attacker_battery": float(b)} for b in batteries])
     end_kph = physics.TAPER_STANDARD_KPH[1]
@@ -776,8 +782,48 @@ def rules(energies_mj=(0.0, 0.25, 0.5, 0.75, 1.0), taper_starts_kph=(290, 300, 3
         with _patched(physics, TAPER_OVERTAKE_MODE_KPH=(float(start), end_kph)):
             for b, q in zip(batteries, simulator.probability(scenarios)):
                 out["taper"]["p"][str(b)].append(float(q))
+
+    sample = pd.concat([pd.DataFrame([DEFAULTS]), simulator.sample_scenarios(3000, np.random.default_rng(5))],
+                       ignore_index=True)
+    model_p = simulator.probability(sample)
+    # acceleration() looks the power limit up by its module-level name, so patching it swaps the taper.
+    with _patched(physics, mguk_power_limit=fia_issue17_power_limit):
+        fia_p = simulator.probability(sample)
+    change = fia_p[1:] - model_p[1:]
+    out["fia_issue17_taper"] = {"default_scenario_model": float(model_p[0]), "default_scenario_fia": float(fia_p[0]),
+                                "scenarios": len(change), "mean_abs_change": float(np.abs(change).mean()),
+                                "mean_change": float(change.mean()), "max_abs_change": float(np.abs(change).max())}
     plots.rules(out, FIGURES / "rules.png")
     return _write("rules", out)
+
+
+def fia_issue17_power_limit(speed, overtake_mode, car=CarParameters()):
+    """MGU-K power limit of the FIA 2026 F1 Technical Regulations, Issue 17, Article C5.2.8.
+
+    Without Overtake Mode: 1800 - 5 v kW below 340 km/h (350 kW up to 290 km/h,
+    100 kW at 340), then 6900 - 20 v kW to zero at 345 km/h. With Overtake
+    Mode: 7100 - 20 v kW (350 kW up to 337.5 km/h) to zero at 355 km/h. Both
+    are capped at ``car.mguk_power_w`` (350 kW, Article C5.2.7). Used by
+    `rules` to measure how much the model's simpler linear taper matters.
+
+    Parameters
+    ----------
+    speed : array_like
+        Car speed, m/s.
+    overtake_mode : array_like of bool
+        Whether Overtake Mode is active.
+    car : CarParameters, optional
+
+    Returns
+    -------
+    numpy.ndarray
+        Power limit, W.
+    """
+    kph = np.asarray(speed) * 3.6
+    standard = np.where(kph < 340, 1800 - 5 * kph, np.where(kph < 345, 6900 - 20 * kph, 0.0))
+    overtake = np.where(kph < 355, 7100 - 20 * kph, 0.0)
+    limit_kw = np.where(np.broadcast_to(overtake_mode, kph.shape), overtake, standard)
+    return np.clip(limit_kw * 1e3, 0.0, car.mguk_power_w)
 
 
 # --- 5. Model selection ------------------------------------------------------
