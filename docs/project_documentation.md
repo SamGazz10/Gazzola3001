@@ -432,7 +432,7 @@ Claude Code (Anthropic) was used throughout, first in a cloud session and then
 a local one. It summarised the 2026 rules; wrote the code, figures and 88
 tests; researched the current-season sources I named (Kaggle, OpenF1) and
 built the OpenF1 comparison; audited the project against the brief; and
-drafted this report and the slides. Its work was checked by the tests, the
+drafted this report. Its work was checked by the tests, the
 exact-solution, convergence and stability studies, regenerating every number
 from code, tracing real passes back to the raw data, and a second agent
 re-checking each audit finding. Other AI errors caught: a first simulator too
